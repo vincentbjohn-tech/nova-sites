@@ -129,10 +129,14 @@ export function setHeadMeta(html: string, meta: SiteMeta): string {
 		out = upsertTag(out, /<meta\s+property=["']og:description["'][^>]*>/i, `<meta property="og:description" content="${d}">`);
 		out = upsertTag(out, /<meta\s+name=["']twitter:description["'][^>]*>/i, `<meta name="twitter:description" content="${d}">`);
 	}
-	if (meta.iconUrl !== undefined) {
+	if (meta.iconUrl === '') {
+		out = out.replace(/\s*<link\s+rel=["'](?:shortcut )?icon["'][^>]*>/gi, '');
+	} else if (meta.iconUrl !== undefined) {
 		out = upsertTag(out, /<link\s+rel=["'](?:shortcut )?icon["'][^>]*>/i, `<link rel="icon" href="${attr(meta.iconUrl)}">`);
 	}
-	if (meta.shareImageUrl !== undefined) {
+	if (meta.shareImageUrl === '') {
+		out = out.replace(/\s*<meta\s+(?:property|name)=["'](?:og:image|twitter:image|twitter:card)["'][^>]*>/gi, '');
+	} else if (meta.shareImageUrl !== undefined) {
 		const s = attr(meta.shareImageUrl);
 		out = upsertTag(out, /<meta\s+property=["']og:image["'][^>]*>/i, `<meta property="og:image" content="${s}">`);
 		out = upsertTag(out, /<meta\s+name=["']twitter:card["'][^>]*>/i, '<meta name="twitter:card" content="summary_large_image">');
@@ -176,4 +180,11 @@ export function toHistory(
 				at: new Date(seconds * 1000).toISOString(),
 			};
 		});
+}
+
+/** The page's current icon and share image (Settings shows them after a reload). */
+export function readHeadMeta(html: string): { iconUrl: string | null; shareImageUrl: string | null } {
+	const icon = /<link\s+rel=["'](?:shortcut )?icon["'][^>]*href=["']([^"']*)["']/i.exec(html)?.[1] ?? null;
+	const share = /<meta\s+property=["']og:image["'][^>]*content=["']([^"']*)["']/i.exec(html)?.[1] ?? null;
+	return { iconUrl: icon && !icon.startsWith('data:') ? icon.replace(/&amp;/g, '&') : icon, shareImageUrl: share ? share.replace(/&amp;/g, '&') : null };
 }

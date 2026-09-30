@@ -32,6 +32,7 @@ import { resolveNovaGatewayModel } from '../../think/nova-gateway';
 import {
 	isEditableSource,
 	OWNER_COMMIT_PREFIX,
+	readHeadMeta,
 	replaceVisibleText,
 	setHeadMeta,
 	toHistory,
@@ -1175,7 +1176,8 @@ export class ThinkCodingBehavior
 		await this.handleDeploySpaceOutput(output);
 		const head = await this.novaHead();
 		const restored = this.state.novaLabels?.[hash];
-		this.novaLabel(head, restored ? `Went back to: ${restored}` : 'Went back to an earlier version');
+		const plain = restored?.replace(/^(Went back to: )+/, '');
+		this.novaLabel(head, plain ? `Went back to: ${plain}` : 'Went back to an earlier version');
 		this.novaPrewarm();
 		return { hash: head, previewUrl: await this.getBrowserPreviewURL() };
 	}
@@ -1247,6 +1249,7 @@ export class ThinkCodingBehavior
 			previewUrl: await this.getBrowserPreviewURL(),
 			unpublished: await this.novaUnpublished(),
 			files: (await this.callSpace((space) => space.glob('**/*'))).filter((p) => !p.startsWith('.think/')),
+			...readHeadMeta(await this.callSpace((space) => space.readFile('public/index.html')).catch(() => '')),
 		};
 	}
 }

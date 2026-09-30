@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { replaceVisibleText, setHeadMeta, toHistory, isEditableSource, OWNER_COMMIT_PREFIX } from './nova-edits';
+import { replaceVisibleText, setHeadMeta, readHeadMeta, toHistory, isEditableSource, OWNER_COMMIT_PREFIX } from './nova-edits';
 
 const html = `<!doctype html><html><head><title>Kristi Grace Hair</title></head><body>
   <h1>Hair that feels
@@ -71,5 +71,15 @@ describe('History', () => {
 			['c3', 'Headline changed', 'you'],
 			['c2', 'Warm the top photo', 'nova'],
 		]);
+	});
+});
+
+describe('icon and share image: read back and remove', () => {
+	it('reads what is set, and an empty value removes the tags', () => {
+		const set = setHeadMeta(html, { iconUrl: 'https://m/i.png', shareImageUrl: 'https://m/s.jpg' });
+		expect(readHeadMeta(set)).toEqual({ iconUrl: 'https://m/i.png', shareImageUrl: 'https://m/s.jpg' });
+		const cleared = setHeadMeta(set, { iconUrl: '', shareImageUrl: '' });
+		expect(readHeadMeta(cleared)).toEqual({ iconUrl: null, shareImageUrl: null });
+		expect(cleared).not.toContain('twitter:image');
 	});
 });
