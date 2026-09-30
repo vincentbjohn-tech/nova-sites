@@ -18,10 +18,14 @@ export function buildEditScript(allowedOrigins: string[]): string {
   let on = sessionStorage.getItem(KEY) === '1';
   let editing = null;
   const style = document.createElement('style');
-  style.textContent = '[data-nova-editable]{cursor:text;outline:1px dashed transparent;outline-offset:3px;transition:outline-color .15s cubic-bezier(.22,1,.36,1)}' +
-    'html[data-nova-edit] [data-nova-editable]:hover{outline-color:rgba(99,102,241,.7)}' +
-    'html[data-nova-edit] img{cursor:pointer}html[data-nova-edit] img:hover{outline:2px solid rgba(99,102,241,.7);outline-offset:2px}' +
-    '[data-nova-editing]{outline:2px solid rgb(99,102,241)!important;outline-offset:3px}';
+  // Nova's accent (#4292b2) for the outlines; hover is the 150 ms colour recipe on Nova's curve, the
+  // element being edited gets a solid ring with a soft halo; with Reduce Motion nothing transitions.
+  style.textContent = '[data-nova-editable]{cursor:text;outline:1px solid transparent;outline-offset:3px;border-radius:3px;transition:outline-color .15s cubic-bezier(.22,1,.36,1),box-shadow .15s cubic-bezier(.22,1,.36,1)}' +
+    'html[data-nova-edit] [data-nova-editable]:hover{outline-color:rgba(66,146,178,.85)}' +
+    'html[data-nova-edit] img{outline:2px solid transparent;outline-offset:2px;transition:outline-color .15s cubic-bezier(.22,1,.36,1)}' +
+    'html[data-nova-edit] img{cursor:pointer}html[data-nova-edit] img:hover{outline-color:rgba(66,146,178,.85)}' +
+    '[data-nova-editing]{outline:2px solid #4292b2!important;outline-offset:3px;box-shadow:0 0 0 6px rgba(66,146,178,.22)!important}' +
+    '@media(prefers-reduced-motion:reduce){[data-nova-editable],html[data-nova-edit] img{transition:none}}';
   document.head.appendChild(style);
   const hasOwnText = (el) => Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.data.trim());
   const textNodes = (el) => { const out = []; const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); while (w.nextNode()) out.push(w.currentNode); return out; };
@@ -75,8 +79,12 @@ export function buildEditScript(allowedOrigins: string[]): string {
   window.addEventListener('message', (e) => {
     if (!ORIGINS.includes(e.origin) || !e.data || e.data.source !== 'nova-os') return;
     if (e.data.type === 'ping') { post({ type: 'ready' }); return; }
+    if (e.data.type === 'scroll-to' && typeof e.data.y === 'number') { window.scrollTo({ top: e.data.y, behavior: 'instant' }); return; }
     if (e.data.type === 'edit-mode') { on = !!e.data.on; sessionStorage.setItem(KEY, on ? '1' : '0'); if (!on && editing) finish(editing, true); mark(); }
   });
+  // Where the page is scrolled, so a new version of it opens at the same place (one message per frame at most).
+  let scrollTick = null;
+  window.addEventListener('scroll', () => { if (scrollTick !== null) return; scrollTick = requestAnimationFrame(() => { scrollTick = null; post({ type: 'scroll', y: window.scrollY }); }); }, { passive: true });
   const start = () => { mark(); new MutationObserver(() => { if (on && !editing) mark(); }).observe(document.body, { childList: true, subtree: true }); post({ type: 'ready' }); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();`;
