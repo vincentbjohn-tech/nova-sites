@@ -165,7 +165,8 @@ export function toHistory(
 		.filter((c) => labels[c.oid] || c.message.trim().startsWith(OWNER_COMMIT_PREFIX))
 		.map((c) => {
 			const raw = c.message.trim();
-			const byOwner = raw.startsWith(OWNER_COMMIT_PREFIX);
+			// The owner's own edits, and restores (only the owner restores).
+			const byOwner = raw.startsWith(OWNER_COMMIT_PREFIX) || raw.startsWith('rollback:');
 			const label = labels[c.oid] ?? (byOwner ? raw.slice(OWNER_COMMIT_PREFIX.length) : raw.replace(/^(chore|deploy|feat|fix|style|refactor)(\([^)]*\))?:\s*/, ''));
 			const seconds = c.author?.timestamp ?? 0;
 			return {

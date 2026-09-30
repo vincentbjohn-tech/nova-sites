@@ -54,6 +54,10 @@ describe('Google & sharing: head tags', () => {
 });
 
 describe('History', () => {
+	it('counts a restore as the owner\'s change', () => {
+		const h = toHistory([{ oid: 'r1', message: 'rollback: restore 1234abcd', author: { timestamp: 1_800_000_400 } }], { r1: 'Went back to: Warm the top photo' });
+		expect(h[0]).toMatchObject({ message: 'Went back to: Warm the top photo', by: 'you' });
+	});
 	it('says who did it in plain words and hides setup commits', () => {
 		const h = toHistory(
 			[

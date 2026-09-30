@@ -33,10 +33,12 @@ export function buildEditScript(allowedOrigins: string[]): string {
     });
   };
   const finish = (el, keep) => {
+    if (el.__novaFinished) return;
+    el.__novaFinished = true;
     const nodes = el.__novaNodes || [];
+    editing = null;
     el.removeAttribute('contenteditable');
     el.removeAttribute('data-nova-editing');
-    editing = null;
     if (!keep) { nodes.forEach((n, i) => { n.data = el.__novaBefore[i]; }); return; }
     const changed = nodes.map((n, i) => ({ before: el.__novaBefore[i], after: n.isConnected ? n.data : null })).filter((c) => c.after !== c.before);
     if (changed.length === 0) return;
@@ -56,6 +58,7 @@ export function buildEditScript(allowedOrigins: string[]): string {
     if (editing === el) return;
     if (editing) finish(editing, true);
     editing = el;
+    el.__novaFinished = false;
     el.__novaNodes = textNodes(el);
     el.__novaBefore = el.__novaNodes.map((n) => n.data);
     el.__novaBeforeText = el.innerText;

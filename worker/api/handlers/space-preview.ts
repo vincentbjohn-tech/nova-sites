@@ -180,13 +180,23 @@ export async function handleSpacePreview(
  * Nova Sites: add the click-and-type script to preview pages. It stays inert
  * unless Nova OS frames the page with edit mode on.
  */
+/** Bumped with every change to the edit script, so framed previews never run a stale copy. */
+const NOVA_EDIT_SCRIPT_VERSION = '7';
+
 function withNovaEditScript(response: Response): Response {
 	if (!(response.headers.get('Content-Type') ?? '').includes('text/html')) return response;
-	return new HTMLRewriter()
+	const transformed = new HTMLRewriter()
 		.on('head', {
 			element(head) {
-				head.append('<script src="/api/nova/edit.js" defer></script>', { html: true });
+				head.append(`<script src="/api/nova/edit.js?v=${NOVA_EDIT_SCRIPT_VERSION}" defer></script>`, { html: true });
 			},
 		})
 		.transform(response);
+	// The page's bytes changed, so its cache tag must too: otherwise a browser
+	// revalidates, gets 304 and keeps a copy without (or with an older) script.
+	const out = new Response(transformed.body, transformed);
+	const etag = out.headers.get('ETag');
+	if (etag) out.headers.set('ETag', `W/"${etag.replace(/^W\//, '').replace(/"/g, '')}-nova${NOVA_EDIT_SCRIPT_VERSION}"`);
+	out.headers.delete('Content-Length');
+	return out;
 }
