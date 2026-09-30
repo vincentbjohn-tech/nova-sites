@@ -74,6 +74,7 @@ export function buildEditScript(allowedOrigins: string[]): string {
   document.addEventListener('focusout', (e) => { if (editing && e.target === editing) finish(editing, true); }, true);
   window.addEventListener('message', (e) => {
     if (!ORIGINS.includes(e.origin) || !e.data || e.data.source !== 'nova-os') return;
+    if (e.data.type === 'ping') { post({ type: 'ready' }); return; }
     if (e.data.type === 'edit-mode') { on = !!e.data.on; sessionStorage.setItem(KEY, on ? '1' : '0'); if (!on && editing) finish(editing, true); mark(); }
   });
   const start = () => { mark(); new MutationObserver(() => { if (on && !editing) mark(); }).observe(document.body, { childList: true, subtree: true }); post({ type: 'ready' }); };
