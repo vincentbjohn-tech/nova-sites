@@ -499,6 +499,9 @@ export class ThinkCodingBehavior
 			this.setState({ ...this.state, pendingUserInputs: [] });
 
 			const compiled = pending.join('\n');
+			// Fresh config for every request: the preview link the agent checks in a
+			// real browser is signed and expires, so an old one answers 401.
+			await this.configureThinkAgent().catch((e) => this.logger.warn('ThinkAgent reconfigure failed', e));
 			const headBefore = await this.novaHead().catch(() => null);
 			try {
 				await this.runPrompt(compiled);
