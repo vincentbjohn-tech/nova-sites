@@ -17,10 +17,12 @@ export function setupNovaRoutes(app: Hono<AppEnv>): void {
     novaRouter.get('/sites', auth, adaptController(S, S.list));
     novaRouter.post('/sites', auth, adaptController(S, S.create));
     novaRouter.post('/sites/import', auth, adaptController(S, S.importSite));
+    novaRouter.post('/images', auth, adaptController(S, S.generateImage));
     novaRouter.get('/sites/:id', auth, adaptController(S, S.get));
     novaRouter.post('/sites/:id/message', auth, adaptController(S, S.message));
     novaRouter.post('/sites/:id/text', auth, adaptController(S, S.text));
     novaRouter.post('/sites/:id/meta', auth, adaptController(S, S.meta));
+    novaRouter.post('/sites/:id/read', auth, adaptController(S, S.read));
     novaRouter.get('/sites/:id/history', auth, adaptController(S, S.history));
     novaRouter.post('/sites/:id/restore', auth, adaptController(S, S.restore));
     novaRouter.post('/sites/:id/publish', auth, adaptController(S, S.publish));

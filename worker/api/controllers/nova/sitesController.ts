@@ -3,6 +3,7 @@ import type { RouteContext } from '../../types/route-context';
 import { AppService } from '../../../database/services/AppService';
 import { getAgentStub } from '../../../agents';
 import { CodingAgentController } from '../agent/controller';
+import type { SiteMeta } from '../../../agents/think/nova-edits';
 
 /** The free address domain: `<name>.<NOVA_SITES_SUBDOMAIN>.workers.dev`. */
 function siteAddress(env: Env, deploymentId: string | null): string | null {
@@ -11,6 +12,9 @@ function siteAddress(env: Env, deploymentId: string | null): string | null {
 }
 
 type Json = Record<string, unknown>;
+
+/** Workers AI text-to-image model used for Nova's images. */
+const NOVA_IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell';
 
 /**
  * Nova Sites (contract: nova-os-app `docs/pages/websites-contract.md` §2).
@@ -153,6 +157,25 @@ export class NovaSitesController extends BaseController {
 		return NovaSitesController.createSuccessResponse({ id: agentId, ...result });
 	}
 
+	/**
+	 * POST /api/nova/images {prompt} -> {image: base64 JPEG, model, ms}. Cloudflare Workers AI
+	 * (FLUX.1 schnell, 1024x1024) through the builder's own AI binding; Nova OS stores the result
+	 * in the owner's media library (resized, described) like any upload. Owners only.
+	 */
+	static async generateImage(request: Request, env: Env, _ctx: ExecutionContext, _context: RouteContext): Promise<Response> {
+		const prompt = NovaSitesController.str((await NovaSitesController.body(request)).prompt, 2000)?.trim();
+		if (!prompt) return NovaSitesController.createErrorResponse('Describe the image you want', 400);
+		const started = Date.now();
+		try {
+			const ai = (env as unknown as { AI: { run: (model: string, input: Record<string, unknown>) => Promise<{ image?: string }> } }).AI;
+			const out = await ai.run(NOVA_IMAGE_MODEL, { prompt, steps: 6 });
+			if (!out?.image) return NovaSitesController.createErrorResponse('No image came back', 502);
+			return NovaSitesController.createSuccessResponse({ image: out.image, model: NOVA_IMAGE_MODEL, ms: Date.now() - started });
+		} catch (error) {
+			return NovaSitesController.handleError(error, 'make the image');
+		}
+	}
+
 	/** GET /api/nova/sites/:id */
 	static async get(_request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
 		const stub = await NovaSitesController.ownedStub(env, context);
@@ -192,23 +215,86 @@ export class NovaSitesController extends BaseController {
 		}
 	}
 
-	/** POST /api/nova/sites/:id/meta {title?, description?, icon_url?, share_image_url?} */
+	/** The Google & sharing fields a body carries (snake_case, as Nova OS sends them); absent stays absent. */
+	private static metaFields(body: Json): SiteMeta | null {
+		const S = NovaSitesController;
+		const meta: SiteMeta = {
+			title: S.str(body.title, 200),
+			description: S.str(body.description, 500),
+			iconUrl: S.str(body.icon_url, 500),
+			shareImageUrl: S.str(body.share_image_url, 500),
+			appleTouchIconUrl: S.str(body.apple_touch_icon_url, 500),
+			canonical: S.str(body.canonical, 500),
+			jsonLd: S.str(body.json_ld, 50_000),
+		};
+		// A field that is present but not a short-enough string is refused, not silently dropped.
+		const keys: [string, keyof SiteMeta][] = [
+			['title', 'title'],
+			['description', 'description'],
+			['icon_url', 'iconUrl'],
+			['share_image_url', 'shareImageUrl'],
+			['apple_touch_icon_url', 'appleTouchIconUrl'],
+			['canonical', 'canonical'],
+			['json_ld', 'jsonLd'],
+		];
+		for (const [wire, key] of keys) if (body[wire] !== undefined && body[wire] !== null && meta[key] === undefined) return null;
+		return meta;
+	}
+
+	/**
+	 * POST /api/nova/sites/:id/meta
+	 *   {title?, description?, icon_url?, share_image_url?, apple_touch_icon_url?, canonical?, json_ld?, path?}
+	 *   one page (`path`, default public/index.html), or
+	 *   {pages: [{path, title?, description?, canonical?, json_ld?}], icon_url?, share_image_url?, ..., by?}
+	 *   several pages as one change: the top-level fields on every listed page, each page's own on top.
+	 *   `by: "nova"` labels the change as Nova's in History (her automatic Google & sharing pass).
+	 */
 	static async meta(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
+		const S = NovaSitesController;
+		const stub = await S.ownedStub(env, context);
+		if (!stub) return S.notFound();
+		const body = await S.body(request);
+		const shared = S.metaFields(body);
+		if (!shared) return S.createErrorResponse('A Google & sharing field is too long or not text', 400);
+		try {
+			if (body.pages === undefined) {
+				const path = S.str(body.path, 300) ?? 'public/index.html';
+				return S.createSuccessResponse(await stub.novaSetMeta(shared, path));
+			}
+			if (!Array.isArray(body.pages) || body.pages.length === 0 || body.pages.length > 100) {
+				return S.createErrorResponse('pages is a list of 1 to 100 pages', 400);
+			}
+			const pages: { path: string; meta: SiteMeta }[] = [];
+			for (const raw of body.pages as unknown[]) {
+				const page = raw && typeof raw === 'object' ? (raw as Json) : {};
+				const path = S.str(page.path, 300);
+				const meta = S.metaFields(page);
+				if (!path || !meta) return S.createErrorResponse('Each page needs its path, and text fields', 400);
+				pages.push({ path, meta });
+			}
+			const result = await stub.novaSetMetaPages(shared, pages, body.by === 'nova' ? 'nova' : 'you');
+			if ('error' in result) {
+				return new Response(JSON.stringify({ success: false, error: result.error, path: result.path }), {
+					status: 409,
+					headers: { 'Content-Type': 'application/json' },
+				});
+			}
+			return S.createSuccessResponse(result);
+		} catch (error) {
+			if (error instanceof Error && error.message.includes('invalid_json_ld')) return S.createErrorResponse('json_ld is not JSON', 400);
+			return S.busyOr(error);
+		}
+	}
+
+	/** POST /api/nova/sites/:id/read {paths} → {files: [{path, content}]} (missing files are left out). */
+	static async read(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
 		const stub = await NovaSitesController.ownedStub(env, context);
 		if (!stub) return NovaSitesController.notFound();
-		const body = await NovaSitesController.body(request);
-		try {
-			return NovaSitesController.createSuccessResponse(
-				await stub.novaSetMeta({
-					title: NovaSitesController.str(body.title, 200),
-					description: NovaSitesController.str(body.description, 500),
-					iconUrl: NovaSitesController.str(body.icon_url, 500),
-					shareImageUrl: NovaSitesController.str(body.share_image_url, 500),
-				}),
-			);
-		} catch (error) {
-			return NovaSitesController.busyOr(error);
+		const paths = (await NovaSitesController.body(request)).paths;
+		if (!Array.isArray(paths) || paths.length === 0 || paths.length > 60 || paths.some((p) => typeof p !== 'string' || p.length > 300)) {
+			return NovaSitesController.createErrorResponse('paths is a list of 1 to 60 file paths', 400);
 		}
+		return NovaSitesController.createSuccessResponse({ files: await stub.novaReadFiles(paths as string[]) });
 	}
 
 	/** GET /api/nova/sites/:id/history */
