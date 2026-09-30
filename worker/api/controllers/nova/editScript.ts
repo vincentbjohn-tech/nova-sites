@@ -1,8 +1,10 @@
 /**
  * Click-and-type inside the site preview (contract §3). Served at
  * /api/nova/edit.js and added to every preview page; it does nothing unless
- * the page is framed by an allowed Nova OS origin and edit mode is on
- * (`nova_edit=1` on the first load, or a message from Nova OS).
+ * the page is framed by an allowed Nova OS origin and Nova OS has turned
+ * edit mode on with an `edit-mode` message (the pencil). It is never on by
+ * itself: not on load, not from the address (`nova_edit=1` only marks the
+ * page as framed by the editor), so the page looks exactly as it does live.
  *
  * Only the text node that changed is reported, so a headline with an
  * <em> inside still maps to exactly one string in the source.
@@ -12,15 +14,15 @@ export function buildEditScript(allowedOrigins: string[]): string {
   if (window.parent === window || window.__novaEdit) return;
   window.__novaEdit = true;
   const ORIGINS = ${JSON.stringify(allowedOrigins)};
-  const KEY = 'nova-edit';
   const post = (msg) => ORIGINS.forEach((o) => { try { window.parent.postMessage({ source: 'nova-sites', ...msg }, o); } catch (e) {} });
-  if (new URLSearchParams(location.search).get('nova_edit') === '1') sessionStorage.setItem(KEY, '1');
-  let on = sessionStorage.getItem(KEY) === '1';
+  let on = false;
   let editing = null;
   const style = document.createElement('style');
   // Nova's accent (#4292b2) for the outlines; hover is the 150 ms colour recipe on Nova's curve, the
   // element being edited gets a solid ring with a soft halo; with Reduce Motion nothing transitions.
-  style.textContent = '[data-nova-editable]{cursor:text;outline:1px solid transparent;outline-offset:3px;border-radius:3px;transition:outline-color .15s cubic-bezier(.22,1,.36,1),box-shadow .15s cubic-bezier(.22,1,.36,1)}' +
+  // Nothing here may change how the page looks: no border-radius (a rounded button must stay rounded;
+  // the outline follows the element's own corners), only the outline while editing is on.
+  style.textContent = 'html[data-nova-edit] [data-nova-editable]{cursor:text;outline:1px solid transparent;outline-offset:3px;transition:outline-color .15s cubic-bezier(.22,1,.36,1),box-shadow .15s cubic-bezier(.22,1,.36,1)}' +
     'html[data-nova-edit] [data-nova-editable]:hover{outline-color:rgba(66,146,178,.85)}' +
     'html[data-nova-edit] img{outline:2px solid transparent;outline-offset:2px;transition:outline-color .15s cubic-bezier(.22,1,.36,1)}' +
     'html[data-nova-edit] img{cursor:pointer}html[data-nova-edit] img:hover{outline-color:rgba(66,146,178,.85)}' +
@@ -80,7 +82,7 @@ export function buildEditScript(allowedOrigins: string[]): string {
     if (!ORIGINS.includes(e.origin) || !e.data || e.data.source !== 'nova-os') return;
     if (e.data.type === 'ping') { post({ type: 'ready' }); return; }
     if (e.data.type === 'scroll-to' && typeof e.data.y === 'number') { window.scrollTo({ top: e.data.y, behavior: 'instant' }); return; }
-    if (e.data.type === 'edit-mode') { on = !!e.data.on; sessionStorage.setItem(KEY, on ? '1' : '0'); if (!on && editing) finish(editing, true); mark(); }
+    if (e.data.type === 'edit-mode') { on = !!e.data.on; if (!on && editing) finish(editing, true); mark(); }
   });
   // Where the page is scrolled, so a new version of it opens at the same place (one message per frame at most).
   let scrollTick = null;

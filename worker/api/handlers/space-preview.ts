@@ -181,7 +181,7 @@ export async function handleSpacePreview(
  * unless Nova OS frames the page with edit mode on.
  */
 /** Bumped with every change to the edit script, so framed previews never run a stale copy. */
-const NOVA_EDIT_SCRIPT_VERSION = '9';
+const NOVA_EDIT_SCRIPT_VERSION = '10';
 
 function withNovaEditScript(response: Response): Response {
 	if (!(response.headers.get('Content-Type') ?? '').includes('text/html')) return response;
