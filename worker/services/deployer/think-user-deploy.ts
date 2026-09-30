@@ -3,6 +3,7 @@ import { CloudflareAPI } from './api/cloudflare-api';
 import { WorkerDeployer } from './deployer';
 import type { AssetConfig, WorkerBinding, WorkerObservability } from './types';
 import { createAssetManifest } from './utils';
+import { optimizeAssetsForPublish, withSearchFiles } from './nova-optimize';
 
 const APP_BINDING = 'VIBE_APP';
 const OBSERVABILITY: WorkerObservability = {
@@ -76,6 +77,8 @@ interface ThinkBundleArtifacts {
 async function buildThinkBundleArtifacts(
 	bundle: BranchDeploymentBundle,
 	appName: string,
+	/** Nova Sites publishing: the site's address; enables page-speed rewrites and search files (nova-optimize). */
+	publishUrl?: string,
 ): Promise<ThinkBundleArtifacts> {
 	const scriptName = sanitizeWorkerName(appName);
 	const modules = new Map<string, string>();
@@ -90,7 +93,8 @@ async function buildThinkBundleArtifacts(
 
 	const assetBuffers = new Map<string, ArrayBuffer>();
 	const assetContents = new Map<string, Buffer>();
-	for (const [rawPath, content] of Object.entries(bundle.assets)) {
+	const sourceAssets = publishUrl ? withSearchFiles(optimizeAssetsForPublish(bundle.assets), publishUrl) : bundle.assets;
+	for (const [rawPath, content] of Object.entries(sourceAssets)) {
 		const path = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
 		const bytes = new TextEncoder().encode(content);
 		assetBuffers.set(path, bytes.buffer as ArrayBuffer);
@@ -219,6 +223,19 @@ export async function deployThinkBundleToPlatform(input: {
 	};
 }
 
+/** Identity of a site's static files: an upload receipt is only valid for this exact set. */
+function manifestKey(artifacts: ThinkBundleArtifacts): string {
+	return Object.entries(artifacts.assets ?? {})
+		.map(([path, info]) => `${path}:${info.hash}`)
+		.sort()
+		.join('|');
+}
+
+/** A site's free address (the account's workers.dev subdomain defaults to Nova's). */
+function siteUrl(scriptName: string, subdomain = 'novasites'): string {
+	return `https://${sanitizeWorkerName(scriptName)}.${subdomain}.workers.dev`;
+}
+
 /** Workers on the account that are not sites: a site can never take their name. */
 const RESERVED_SITE_NAMES = new Set(['builder', 'media', 'nova-sites-test', 'www', 'api', 'admin']);
 
@@ -260,14 +277,15 @@ export async function deployThinkBundleToWorkersDev(input: {
 	/** Known account subdomain and an address already switched on: skip both lookups (republish). */
 	subdomain?: string;
 	alreadyLive?: boolean;
-	/** From prewarmSiteAssets for this same commit: Publish skips the upload round trips. */
-	preparedCompletionJwt?: string;
+	/** From prewarmSiteAssets: used only when it was made for exactly these files. */
+	prepared?: { manifestKey: string; completionJwt: string } | null;
 }): Promise<ThinkUserDeploymentResult> {
 	const t0 = Date.now();
-	const artifacts = await buildThinkBundleArtifacts(input.bundle, input.scriptName);
+	const artifacts = await buildThinkBundleArtifacts(input.bundle, input.scriptName, siteUrl(input.scriptName, input.subdomain));
 	const t1 = Date.now();
 	const deployer = new WorkerDeployer(input.accountId, input.apiToken);
-	await deployArtifacts(deployer, artifacts, undefined, input.preparedCompletionJwt);
+	const reuse = input.prepared && input.prepared.manifestKey === manifestKey(artifacts) ? input.prepared.completionJwt : undefined;
+	await deployArtifacts(deployer, artifacts, undefined, reuse);
 	const t2 = Date.now();
 	const api = new CloudflareAPI(input.accountId, input.apiToken);
 	if (!input.alreadyLive) await api.enableWorkersDev(artifacts.scriptName);
@@ -285,13 +303,14 @@ export async function prewarmSiteAssets(input: {
 	apiToken: string;
 	scriptName: string;
 	bundle: BranchDeploymentBundle;
-}): Promise<{ uploaded: number; completionJwt: string; commitHash: string } | null> {
-	const artifacts = await buildThinkBundleArtifacts(input.bundle, input.scriptName);
+	subdomain?: string;
+}): Promise<{ uploaded: number; completionJwt: string; manifestKey: string } | null> {
+	const artifacts = await buildThinkBundleArtifacts(input.bundle, input.scriptName, siteUrl(input.scriptName, input.subdomain));
 	if (!artifacts.assets) return null;
 	const result = await new WorkerDeployer(input.accountId, input.apiToken).uploadAssetsOnly(
 		artifacts.scriptName,
 		artifacts.assets,
 		artifacts.assetContents,
 	);
-	return { ...result, commitHash: input.bundle.commitHash };
+	return { ...result, manifestKey: manifestKey(artifacts) };
 }

@@ -1055,10 +1055,9 @@ export class ThinkCodingBehavior
 			});
 			const subdomain = (this.env as unknown as { NOVA_SITES_SUBDOMAIN?: string }).NOVA_SITES_SUBDOMAIN || undefined;
 			const alreadyLive = !this.state.novaUnpublished && this.state.cloudflareDeploymentUrl === `https://${scriptName}.${subdomain}.workers.dev`;
-			const prepared = this.novaPrepared;
-			const preparedCompletionJwt =
-				prepared && prepared.commitHash === bundle.commitHash && Date.now() - prepared.at < 30 * 60_000 ? prepared.jwt : undefined;
-			const result = await deployThinkBundleToWorkersDev({ accountId, apiToken, scriptName, bundle, subdomain, alreadyLive, preparedCompletionJwt });
+			const prepared = this.novaPrepared && Date.now() - this.novaPrepared.at < 30 * 60_000 ? this.novaPrepared : null;
+			const result = await deployThinkBundleToWorkersDev({ accountId, apiToken, scriptName, bundle, subdomain, alreadyLive, prepared });
+			this.novaPrepared = null;
 			await new AppService(this.env).updateDeploymentId(instanceId, result.deploymentId);
 			this.setState({ ...this.state, cloudflareDeploymentUrl: result.deploymentUrl });
 			this.broadcast(WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_COMPLETED, {
@@ -1097,7 +1096,7 @@ export class ThinkCodingBehavior
 	}
 
 	/** The pre-uploaded files' receipt for one commit (asset upload tokens last about an hour). */
-	private novaPrepared: { commitHash: string; jwt: string; at: number } | null = null;
+	private novaPrepared: { manifestKey: string; completionJwt: string; at: number } | null = null;
 
 	/** After a change to a published site: upload its changed files now, so Publish is fast. */
 	private novaPrewarm(): void {
@@ -1111,8 +1110,9 @@ export class ThinkCodingBehavior
 				apiToken: this.env.CLOUDFLARE_API_TOKEN,
 				scriptName,
 				bundle,
+				subdomain: (this.env as unknown as { NOVA_SITES_SUBDOMAIN?: string }).NOVA_SITES_SUBDOMAIN || undefined,
 			});
-			if (prepared) this.novaPrepared = { commitHash: prepared.commitHash, jwt: prepared.completionJwt, at: Date.now() };
+			if (prepared) this.novaPrepared = { manifestKey: prepared.manifestKey, completionJwt: prepared.completionJwt, at: Date.now() };
 			this.logger.info('nova_publish_prewarmed', { uploaded: prepared?.uploaded ?? 0, ms: Date.now() - started });
 		})().catch((e) => this.logger.warn('nova_publish_prewarm_failed', e));
 	}
