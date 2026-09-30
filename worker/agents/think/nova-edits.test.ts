@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { replaceVisibleText, setHeadMeta, readHeadMeta, toHistory, isEditableSource, OWNER_COMMIT_PREFIX } from './nova-edits';
+import { replaceVisibleText, setHeadMeta, readHeadMeta, readPageMeta, planMetaChanges, toHistory, isEditableSource, OWNER_COMMIT_PREFIX } from './nova-edits';
 
 const html = `<!doctype html><html><head><title>Kristi Grace Hair</title></head><body>
   <h1>Hair that feels
@@ -81,5 +81,107 @@ describe('icon and share image: read back and remove', () => {
 		const cleared = setHeadMeta(set, { iconUrl: '', shareImageUrl: '' });
 		expect(readHeadMeta(cleared)).toEqual({ iconUrl: null, shareImageUrl: null });
 		expect(cleared).not.toContain('twitter:image');
+	});
+});
+
+describe('Google & sharing: every page, in one change', () => {
+	const home = `<!doctype html><html><head><title>Vite App</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%2F%3E">
+<meta content="https://pub-x.r2.dev/lovable-shot.png" property="og:image">
+<script type="application/ld+json">{"@type":"WebSite","name":"Kristine Grace"}</script>
+</head><body><h1>Hair</h1></body></html>`;
+	const about = '<!doctype html><html><head><title>About</title></head><body><p>About Kristi</p></body></html>';
+	const pages = [
+		{ path: 'public/index.html', content: home },
+		{ path: 'public/about.html', content: about },
+		{ path: 'src/index.ts', content: 'export {}' },
+	];
+
+	it('sets a title and description per page, and shared tags on every page', () => {
+		const r = planMetaChanges(pages, { shareImageUrl: 'https://m/s.jpg', iconUrl: 'https://m/i-512.png', appleTouchIconUrl: 'https://m/i-180.png' }, [
+			{ path: 'public/index.html', meta: { title: 'Kristi Grace Hair — Balayage in Austin', canonical: 'https://kristi.novasites.workers.dev/' } },
+			{ path: '/public/about.html', meta: { description: 'Meet Kristi.', canonical: 'https://kristi.novasites.workers.dev/about' } },
+		]);
+		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		const byPath = Object.fromEntries(r.changes.map((c) => [c.path, c.content]));
+		expect(Object.keys(byPath).sort()).toEqual(['public/about.html', 'public/index.html']);
+		expect(byPath['public/index.html']).toContain('<title>Kristi Grace Hair — Balayage in Austin</title>');
+		expect(byPath['public/about.html']).toContain('<title>About</title>');
+		expect(byPath['public/about.html']).toContain('<meta name="description" content="Meet Kristi.">');
+		for (const html of Object.values(byPath)) {
+			expect(html).toContain('<meta property="og:image" content="https://m/s.jpg">');
+			expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
+			expect(html).toContain('<link rel="icon" href="https://m/i-512.png">');
+			expect(html).toContain('<link rel="apple-touch-icon" href="https://m/i-180.png">');
+			expect(html.match(/og:image"/g)).toHaveLength(1);
+		}
+		// the attribute-order-swapped foreign og:image was replaced, not duplicated
+		expect(byPath['public/index.html']).not.toContain('lovable-shot');
+		expect(byPath['public/index.html']).toContain('<link rel="canonical" href="https://kristi.novasites.workers.dev/">');
+		expect(byPath['public/index.html']).toContain('<meta property="og:url" content="https://kristi.novasites.workers.dev/">');
+		expect(byPath['public/about.html']).toContain('<link rel="canonical" href="https://kristi.novasites.workers.dev/about">');
+	});
+
+	it('a page field the request left out never hides a shared one (the controller passes absent fields as undefined)', () => {
+		const r = planMetaChanges(pages, { shareImageUrl: 'https://m/s.jpg', iconUrl: 'https://m/i.png' }, [
+			{ path: 'public/index.html', meta: { title: undefined, shareImageUrl: undefined, iconUrl: undefined, canonical: 'https://k.novasites.workers.dev/' } },
+		]);
+		expect(r.ok && r.changes[0].content).toContain('<meta property="og:image" content="https://m/s.jpg">');
+		expect(r.ok && r.changes[0].content).toContain('<link rel="icon" href="https://m/i.png">');
+	});
+
+	it('refuses a page that is not an HTML file of the site, and changes nothing', () => {
+		expect(planMetaChanges(pages, {}, [{ path: 'public/missing.html', meta: { title: 'x' } }])).toEqual({ ok: false, error: 'not_found', path: 'public/missing.html' });
+		expect(planMetaChanges(pages, {}, [{ path: 'src/index.ts', meta: { title: 'x' } }])).toEqual({ ok: false, error: 'not_found', path: 'src/index.ts' });
+	});
+
+	it('leaves pages that would not change out of the commit', () => {
+		const want = [{ path: 'public/about.html', meta: { title: 'About Kristi', description: 'Meet Kristi.' } }];
+		const once = planMetaChanges(pages, {}, want);
+		expect(once.ok && once.changes.length).toBe(1);
+		const after = pages.map((p) => (once.ok && p.path === 'public/about.html' ? once.changes[0] : p));
+		expect(planMetaChanges(after, {}, want)).toEqual({ ok: true, changes: [] });
+	});
+
+	it('writes Nova\'s business block, replaces it next time, and keeps the owner\'s own JSON-LD', () => {
+		const block = { '@context': 'https://schema.org', '@type': 'HairSalon', name: 'Kristi </script><script>alert(1)</script>' };
+		const once = setHeadMeta(home, { jsonLd: JSON.stringify(block) });
+		expect(once.match(/data-nova="business"/g)).toHaveLength(1);
+		expect(once).toContain('{"@type":"WebSite","name":"Kristine Grace"}');
+		expect(once).not.toContain('</script><script>alert(1)');
+		const script = /<script type="application\/ld\+json" data-nova="business">([\s\S]*?)<\/script>/.exec(once)?.[1] ?? '';
+		expect(JSON.parse(script).name).toBe('Kristi </script><script>alert(1)</script>');
+		const twice = setHeadMeta(once, { jsonLd: JSON.stringify({ ...block, name: 'Kristi Grace Hair' }) });
+		expect(twice.match(/data-nova="business"/g)).toHaveLength(1);
+		expect(twice).toContain('Kristi Grace Hair');
+		expect(readPageMeta(twice).jsonLd).toContain('"HairSalon"');
+		const removed = setHeadMeta(twice, { jsonLd: '' });
+		expect(removed).not.toContain('data-nova="business"');
+		expect(removed).toContain('"WebSite"');
+	});
+
+	it('refuses JSON-LD that is not JSON', () => {
+		expect(() => setHeadMeta(home, { jsonLd: '{not json' })).toThrow('invalid_json_ld');
+	});
+
+	it('reads back everything Settings shows', () => {
+		const html = setHeadMeta(home, {
+			title: 'Kristi & Co',
+			description: 'Color "that lasts".',
+			canonical: 'https://www.kristigrace.com/',
+			shareImageUrl: 'https://m/s.jpg?a=1&b=2',
+		});
+		expect(readPageMeta(html)).toEqual({
+			title: 'Kristi & Co',
+			description: 'Color "that lasts".',
+			canonical: 'https://www.kristigrace.com/',
+			iconUrl: 'data:image/svg+xml,%3Csvg%2F%3E',
+			appleTouchIconUrl: null,
+			shareImageUrl: 'https://m/s.jpg?a=1&b=2',
+			jsonLd: null,
+		});
+		expect(readPageMeta(setHeadMeta(html, { canonical: '' })).canonical).toBeNull();
+		expect(setHeadMeta(html, { canonical: '' })).not.toContain('og:url');
 	});
 });

@@ -32,7 +32,9 @@ import { resolveNovaGatewayModel } from '../../think/nova-gateway';
 import {
 	isEditableSource,
 	OWNER_COMMIT_PREFIX,
+	planMetaChanges,
 	readHeadMeta,
+	readPageMeta,
 	replaceVisibleText,
 	setHeadMeta,
 	toHistory,
@@ -1139,9 +1141,17 @@ export class ThinkCodingBehavior
 
 	/** Write one file as the owner's change: commit it with their words, redeploy the preview. */
 	private async novaCommitOwnerChange(path: string, content: string, label: string) {
+		return this.novaCommitChange([{ path, content }], label, 'you');
+	}
+
+	/**
+	 * Write files as one change and redeploy the preview. `you` commits carry the
+	 * owner prefix (History says "you"); `nova` ones are labelled Nova's.
+	 */
+	private async novaCommitChange(files: SourceFile[], label: string, by: 'you' | 'nova') {
 		if (this.isCodeGenerating()) throw new Error('busy');
-		await this.callSpace((space) => space.writeFile(path, content));
-		await this.callSpace((space) => space.gitCommit(`${OWNER_COMMIT_PREFIX}${label}`));
+		for (const f of files) await this.callSpace((space) => space.writeFile(f.path, f.content));
+		await this.callSpace((space) => space.gitCommit(by === 'you' ? `${OWNER_COMMIT_PREFIX}${label}` : `chore(nova): ${label}`));
 		const previewUrl = await this.deployCurrentBranch();
 		const hash = await this.novaHead();
 		this.novaLabel(hash, label);
@@ -1159,10 +1169,42 @@ export class ThinkCodingBehavior
 		return { path: result.path, ...done, ms: Date.now() - started };
 	}
 
-	async novaSetMeta(meta: SiteMeta) {
-		const path = 'public/index.html';
-		const html = await this.callSpace((space) => space.readFile(path));
-		return this.novaCommitOwnerChange(path, setHeadMeta(html, meta), 'Updated how the site shows on Google and when shared');
+	async novaSetMeta(meta: SiteMeta, path = 'public/index.html') {
+		const html = await this.callSpace((space) => space.readFile(path.replace(/^\/+/, '')));
+		return this.novaCommitOwnerChange(path.replace(/^\/+/, ''), setHeadMeta(html, meta), 'Updated how the site shows on Google and when shared');
+	}
+
+	/**
+	 * Google & sharing for several pages as one change: `shared` on every listed page,
+	 * each page's own fields on top. Nothing to change is no commit (`changed: 0`).
+	 */
+	async novaSetMetaPages(shared: SiteMeta, pages: { path: string; meta: SiteMeta }[], by: 'you' | 'nova') {
+		const files: SourceFile[] = [];
+		for (const page of pages) {
+			const path = page.path.replace(/^\/+/, '');
+			const content = await this.callSpace((space) => space.readFile(path)).catch(() => undefined);
+			if (typeof content === 'string') files.push({ path, content });
+		}
+		const plan = planMetaChanges(files, shared, pages);
+		if (!plan.ok) return { error: plan.error, path: plan.path };
+		if (plan.changes.length === 0) {
+			return { hash: await this.novaHead(), previewUrl: await this.getBrowserPreviewURL(), changed: 0 };
+		}
+		const label = by === 'nova' ? 'Nova set how the site shows on Google and when shared' : 'Updated how the site shows on Google and when shared';
+		const done = await this.novaCommitChange(plan.changes, label, by);
+		return { ...done, changed: plan.changes.length };
+	}
+
+	/** Read site files as they are now (Nova OS reads each page's head, words and pictures). */
+	async novaReadFiles(paths: string[]) {
+		const out: { path: string; content: string }[] = [];
+		for (const raw of paths) {
+			const path = raw.replace(/^\/+/, '');
+			if (!path || path.includes('..') || /^(\.git|\.think)\//.test(path)) continue;
+			const content = await this.callSpace((space) => space.readFile(path)).catch(() => undefined);
+			if (typeof content === 'string') out.push({ path, content: content.length > 3_000_000 ? content.slice(0, 3_000_000) : content });
+		}
+		return out;
 	}
 
 	async novaHistory() {
@@ -1282,12 +1324,19 @@ export class ThinkCodingBehavior
 			previewUrl: await this.getBrowserPreviewURL(),
 			unpublished: await this.novaUnpublished(),
 			files: (await this.callSpace((space) => space.glob('**/*'))).filter((p) => !p.startsWith('.think/')),
-			...readHeadMeta(await this.callSpace((space) => space.readFile('public/index.html')).catch(() => '')),
+			...novaHomeMeta(await this.callSpace((space) => space.readFile('public/index.html')).catch(() => '')),
 		};
 	}
 }
 
 // ───────────────────────────── helpers ─────────────────────────────
+
+/** The home page's head as the summary gives it: icon and share image (as before), plus the page's
+ *  own title, description and address for Settings › Google & sharing. */
+function novaHomeMeta(html: string) {
+	const page = readPageMeta(html);
+	return { ...readHeadMeta(html), pageTitle: page.title, description: page.description, canonical: page.canonical };
+}
 
 /** Poll a just-published address until the site answers (not Cloudflare's placeholder); at most 90 s. */
 async function novaWaitUntilLive(url: string): Promise<void> {

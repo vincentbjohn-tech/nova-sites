@@ -103,10 +103,25 @@ export interface SiteMeta {
 	description?: string;
 	iconUrl?: string;
 	shareImageUrl?: string;
+	/** The home-screen icon (180 px). `''` removes it. */
+	appleTouchIconUrl?: string;
+	/** The page's real address: `<link rel=canonical>` and `og:url`. `''` removes both. */
+	canonical?: string;
+	/** Nova's business block for Google (JSON text). `''` removes it; the owner's own JSON-LD is never touched. */
+	jsonLd?: string;
 }
 
 function attr(value: string): string {
 	return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function unattr(value: string): string {
+	return value.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+/** A `<meta>` or `<link>` tag with this attribute anywhere in it (attribute order varies by generator). */
+function tagWith(tag: 'meta' | 'link', name: string, value: string, flags = 'i'): RegExp {
+	return new RegExp(`<${tag}\\b[^>]*\\b${name}=["']${escapeRegExp(value)}["'][^>]*>`, flags);
 }
 
 function upsertTag(html: string, find: RegExp, tag: string): string {
@@ -114,35 +129,136 @@ function upsertTag(html: string, find: RegExp, tag: string): string {
 	return html.replace(/<\/head>/i, `    ${tag}\n  </head>`);
 }
 
-/** Set the page's title, description, icon and share image in `<head>` (Google & sharing). */
+function removeTag(html: string, find: RegExp): string {
+	const all = new RegExp(`\\s*${find.source}`, find.flags.includes('g') ? find.flags : `${find.flags}g`);
+	return html.replace(all, '');
+}
+
+const NOVA_JSON_LD = /<script\b[^>]*\bdata-nova=["']business["'][^>]*>[\s\S]*?<\/script>/i;
+
+/** JSON text that is safe inside `<script>`: `<` is written as `\u003c`, so no `</script>` can end it early. */
+function scriptJson(text: string): string {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		throw new Error('invalid_json_ld');
+	}
+	if (!parsed || typeof parsed !== 'object') throw new Error('invalid_json_ld');
+	return JSON.stringify(parsed).replace(/</g, '\\u003c');
+}
+
+/** Set the page's title, description, icon, share image, address and business block in `<head>` (Google & sharing). */
 export function setHeadMeta(html: string, meta: SiteMeta): string {
 	let out = html;
 	if (meta.title !== undefined) {
 		const t = attr(meta.title);
 		out = upsertTag(out, /<title>[\s\S]*?<\/title>/i, `<title>${t}</title>`);
-		out = upsertTag(out, /<meta\s+property=["']og:title["'][^>]*>/i, `<meta property="og:title" content="${t}">`);
-		out = upsertTag(out, /<meta\s+name=["']twitter:title["'][^>]*>/i, `<meta name="twitter:title" content="${t}">`);
+		out = upsertTag(out, tagWith('meta', 'property', 'og:title'), `<meta property="og:title" content="${t}">`);
+		out = upsertTag(out, tagWith('meta', 'name', 'twitter:title'), `<meta name="twitter:title" content="${t}">`);
 	}
 	if (meta.description !== undefined) {
 		const d = attr(meta.description);
-		out = upsertTag(out, /<meta\s+name=["']description["'][^>]*>/i, `<meta name="description" content="${d}">`);
-		out = upsertTag(out, /<meta\s+property=["']og:description["'][^>]*>/i, `<meta property="og:description" content="${d}">`);
-		out = upsertTag(out, /<meta\s+name=["']twitter:description["'][^>]*>/i, `<meta name="twitter:description" content="${d}">`);
+		out = upsertTag(out, tagWith('meta', 'name', 'description'), `<meta name="description" content="${d}">`);
+		out = upsertTag(out, tagWith('meta', 'property', 'og:description'), `<meta property="og:description" content="${d}">`);
+		out = upsertTag(out, tagWith('meta', 'name', 'twitter:description'), `<meta name="twitter:description" content="${d}">`);
 	}
 	if (meta.iconUrl === '') {
 		out = out.replace(/\s*<link\s+rel=["'](?:shortcut )?icon["'][^>]*>/gi, '');
 	} else if (meta.iconUrl !== undefined) {
 		out = upsertTag(out, /<link\s+rel=["'](?:shortcut )?icon["'][^>]*>/i, `<link rel="icon" href="${attr(meta.iconUrl)}">`);
 	}
+	if (meta.appleTouchIconUrl === '') {
+		out = removeTag(out, tagWith('link', 'rel', 'apple-touch-icon'));
+	} else if (meta.appleTouchIconUrl !== undefined) {
+		out = upsertTag(out, tagWith('link', 'rel', 'apple-touch-icon'), `<link rel="apple-touch-icon" href="${attr(meta.appleTouchIconUrl)}">`);
+	}
 	if (meta.shareImageUrl === '') {
-		out = out.replace(/\s*<meta\s+(?:property|name)=["'](?:og:image|twitter:image|twitter:card)["'][^>]*>/gi, '');
+		out = out.replace(/\s*<meta\b[^>]*\b(?:property|name)=["'](?:og:image|twitter:image|twitter:card)["'][^>]*>/gi, '');
 	} else if (meta.shareImageUrl !== undefined) {
 		const s = attr(meta.shareImageUrl);
-		out = upsertTag(out, /<meta\s+property=["']og:image["'][^>]*>/i, `<meta property="og:image" content="${s}">`);
-		out = upsertTag(out, /<meta\s+name=["']twitter:card["'][^>]*>/i, '<meta name="twitter:card" content="summary_large_image">');
-		out = upsertTag(out, /<meta\s+name=["']twitter:image["'][^>]*>/i, `<meta name="twitter:image" content="${s}">`);
+		out = upsertTag(out, tagWith('meta', 'property', 'og:image'), `<meta property="og:image" content="${s}">`);
+		out = upsertTag(out, tagWith('meta', 'name', 'twitter:card'), '<meta name="twitter:card" content="summary_large_image">');
+		out = upsertTag(out, tagWith('meta', 'name', 'twitter:image'), `<meta name="twitter:image" content="${s}">`);
+		if (!tagWith('meta', 'property', 'og:type').test(out)) out = upsertTag(out, tagWith('meta', 'property', 'og:type'), '<meta property="og:type" content="website">');
+	}
+	if (meta.canonical === '') {
+		out = removeTag(out, tagWith('link', 'rel', 'canonical'));
+		out = removeTag(out, tagWith('meta', 'property', 'og:url'));
+	} else if (meta.canonical !== undefined) {
+		const c = attr(meta.canonical);
+		out = upsertTag(out, tagWith('link', 'rel', 'canonical'), `<link rel="canonical" href="${c}">`);
+		out = upsertTag(out, tagWith('meta', 'property', 'og:url'), `<meta property="og:url" content="${c}">`);
+	}
+	if (meta.jsonLd === '') {
+		out = out.replace(new RegExp(`\\s*${NOVA_JSON_LD.source}`, 'i'), '');
+	} else if (meta.jsonLd !== undefined) {
+		const tag = `<script type="application/ld+json" data-nova="business">${scriptJson(meta.jsonLd)}</script>`;
+		// A function replacement: `$` in the JSON must not be read as a replacement pattern.
+		out = NOVA_JSON_LD.test(out) ? out.replace(NOVA_JSON_LD, () => tag) : out.replace(/<\/head>/i, () => `    ${tag}\n  </head>`);
 	}
 	return out;
+}
+
+export interface PageMeta {
+	title: string | null;
+	description: string | null;
+	canonical: string | null;
+	iconUrl: string | null;
+	appleTouchIconUrl: string | null;
+	shareImageUrl: string | null;
+	/** Nova's business block, as JSON text (the owner's own JSON-LD is not included). */
+	jsonLd: string | null;
+}
+
+function contentOf(html: string, find: RegExp, attrName: 'content' | 'href'): string | null {
+	const tag = find.exec(html)?.[0];
+	if (!tag) return null;
+	const value = new RegExp(`\\b${attrName}=(?:"([^"]*)"|'([^']*)')`, 'i').exec(tag);
+	return value ? unattr(value[1] ?? value[2] ?? '') : null;
+}
+
+/** Everything Google & sharing shows for one page, read from its `<head>`. */
+export function readPageMeta(html: string): PageMeta {
+	const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
+	const block = NOVA_JSON_LD.exec(html)?.[0];
+	return {
+		title: title !== undefined ? unattr(title.trim()) : null,
+		description: contentOf(html, tagWith('meta', 'name', 'description'), 'content'),
+		canonical: contentOf(html, tagWith('link', 'rel', 'canonical'), 'href'),
+		iconUrl: contentOf(html, /<link\s+rel=["'](?:shortcut )?icon["'][^>]*>/i, 'href'),
+		appleTouchIconUrl: contentOf(html, tagWith('link', 'rel', 'apple-touch-icon'), 'href'),
+		shareImageUrl: contentOf(html, tagWith('meta', 'property', 'og:image'), 'content'),
+		jsonLd: block ? block.replace(/^<script[^>]*>/i, '').replace(/<\/script>$/i, '') : null,
+	};
+}
+
+/** A page of the site that has a `<head>`: an HTML file (served from `public/`). */
+export function isPagePath(path: string): boolean {
+	return /\.html?$/i.test(path) && !/(^|\/)(node_modules|dist|\.think|\.git)\//.test(path);
+}
+
+export type MetaPlan = { ok: true; changes: SourceFile[] } | { ok: false; error: 'not_found'; path: string };
+
+/**
+ * Google & sharing for several pages in one change: `shared` goes on every listed
+ * page (the icon, the share image), each page's own `meta` on top (its title,
+ * description, address, business block). Only pages whose HTML actually changes
+ * are returned; a page that isn't one of the site's HTML files is `not_found`.
+ */
+export function planMetaChanges(files: SourceFile[], shared: SiteMeta, pages: { path: string; meta: SiteMeta }[]): MetaPlan {
+	const byPath = new Map(files.map((f) => [f.path.replace(/^\/+/, ''), f.content]));
+	const changes: SourceFile[] = [];
+	for (const page of pages) {
+		const path = page.path.replace(/^\/+/, '');
+		const html = byPath.get(path);
+		if (html === undefined || !isPagePath(path)) return { ok: false, error: 'not_found', path };
+		// Only the fields this page really carries sit on top of the shared ones (absent = undefined).
+		const own = Object.fromEntries(Object.entries(page.meta).filter(([, v]) => v !== undefined)) as SiteMeta;
+		const next = setHeadMeta(html, { ...shared, ...own });
+		if (next !== html) changes.push({ path, content: next });
+	}
+	return { ok: true, changes };
 }
 
 /** Commit messages for the owner's own changes start with this, so History can say "you". */
