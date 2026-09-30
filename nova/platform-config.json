@@ -1,0 +1,8 @@
+{
+  "security": {
+    "rateLimit": {
+      "appCreation": { "limit": 50, "dailyLimit": 50 },
+      "llmCalls": { "limit": 5000 }
+    }
+  }
+}

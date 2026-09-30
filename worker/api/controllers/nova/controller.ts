@@ -4,10 +4,20 @@ import { SessionService } from '../../../database/services/SessionService';
 import { UserService } from '../../../database/services/UserService';
 import { setSecureAuthCookies } from '../../../utils/authUtils';
 import { generateId } from '../../../utils/idGenerator';
+import { buildEditScript } from './editScript';
 import { verifyNovaAssertion } from '../../../services/nova/novaAssertion';
 
 interface NovaEnv {
 	NOVA_SITES_SSO_SECRET?: string;
+	/** Comma-separated Nova OS origins allowed to frame previews and receive edits. */
+	NOVA_OS_ORIGINS?: string;
+}
+
+export function novaOsOrigins(env: Env): string[] {
+	return ((env as unknown as NovaEnv).NOVA_OS_ORIGINS ?? 'https://os.usenovaos.com')
+		.split(',')
+		.map((o) => o.trim())
+		.filter(Boolean);
 }
 
 /**
@@ -62,5 +72,12 @@ export class NovaController extends BaseController {
 		const response = new Response(null, { status: 302, headers: { Location: target } });
 		setSecureAuthCookies(response, { accessToken: opened.accessToken, accessTokenExpiry: SessionService.config.sessionTTL });
 		return response;
+	}
+
+	/** GET /api/nova/edit.js — click-and-type inside the preview (contract §3). */
+	static async editScript(_request: Request, env: Env, _ctx: ExecutionContext, _context: RouteContext): Promise<Response> {
+		return new Response(buildEditScript(novaOsOrigins(env)), {
+			headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=300' },
+		});
 	}
 }

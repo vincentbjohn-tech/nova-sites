@@ -134,7 +134,9 @@ export async function handleSpacePreview(
 	branch: string,
 ): Promise<Response> {
 	const url = new URL(request.url);
-	const crossSite = isSeparatePreviewDomain(env);
+	// Nova Sites: previews are framed by Nova OS (another site), so on https the
+	// preview cookie must be the cross-site kind.
+	const crossSite = isSeparatePreviewDomain(env) || url.protocol === 'https:';
 	const secure = url.protocol === 'https:';
 
 	// 1. Existing preview cookie (covers iframe sub-resources / client fetches).
@@ -144,7 +146,7 @@ export async function handleSpacePreview(
 		if (claims && (await isPreviewVersionCurrent(env, spaceName, claims))) {
 			const limited = await enforcePreviewRateLimit(env, cookieToken, request);
 			if (limited) return limited;
-			return forwardToSpacePreview(request, env, spaceName);
+			return withNovaEditScript(await forwardToSpacePreview(request, env, spaceName));
 		}
 	}
 
@@ -155,7 +157,7 @@ export async function handleSpacePreview(
 		if (claims && (await isPreviewVersionCurrent(env, spaceName, claims))) {
 			const limited = await enforcePreviewRateLimit(env, queryToken, request);
 			if (limited) return limited;
-			const response = await forwardToSpacePreview(request, env, spaceName);
+			const response = withNovaEditScript(await forwardToSpacePreview(request, env, spaceName));
 			if (isWebSocketResponse(response)) {
 				return response;
 			}
@@ -172,4 +174,19 @@ export async function handleSpacePreview(
 		return createPreviewAccessResponse(401, 'Access denied', 'This preview link is invalid or has expired.');
 	}
 	return createPreviewAccessResponse(401, 'Access denied', 'This preview link is missing an access token.');
+}
+
+/**
+ * Nova Sites: add the click-and-type script to preview pages. It stays inert
+ * unless Nova OS frames the page with edit mode on.
+ */
+function withNovaEditScript(response: Response): Response {
+	if (!(response.headers.get('Content-Type') ?? '').includes('text/html')) return response;
+	return new HTMLRewriter()
+		.on('head', {
+			element(head) {
+				head.append('<script src="/api/nova/edit.js" defer></script>', { html: true });
+			},
+		})
+		.transform(response);
 }

@@ -27,6 +27,36 @@ export class WorkerDeployer {
 	 * Handles asset upload session, batch uploads, and final deployment
 	 * @param fileContents Map of file paths to their contents as Buffer
 	 */
+	/**
+	 * Nova Sites: upload a site's changed static files ahead of Publish. Assets
+	 * are content-addressed, so this changes nothing that is live; the later
+	 * Publish then finds them cached and only swaps the Worker version.
+	 */
+	async uploadAssetsOnly(
+		scriptName: string,
+		assetsManifest: AssetManifest,
+		fileContents: Map<string, Buffer>,
+	): Promise<{ uploaded: number; completionJwt: string }> {
+		const uploadSession = await this.api.createAssetUploadSession(scriptName, assetsManifest, undefined);
+		if (!uploadSession.buckets || uploadSession.buckets.length === 0) {
+			return { uploaded: 0, completionJwt: uploadSession.jwt };
+		}
+		const hashToPath = new Map<string, string>();
+		const hashToContent = new Map<string, Buffer>();
+		for (const [path, info] of Object.entries(assetsManifest)) {
+			const content = fileContents.get(path);
+			if (!content) throw new Error(`File content not found for path: ${path}`);
+			hashToPath.set(info.hash, path);
+			hashToContent.set(info.hash, content);
+		}
+		let completionJwt = uploadSession.jwt;
+		for (const bucket of uploadSession.buckets) {
+			const token = await this.api.uploadAssetBatch(uploadSession.jwt, bucket, hashToContent, hashToPath);
+			if (token) completionJwt = token;
+		}
+		return { uploaded: uploadSession.buckets.flat().length, completionJwt };
+	}
+
 	async deployWithAssets(
 		scriptName: string,
 		workerContent: string,
@@ -41,6 +71,8 @@ export class WorkerDeployer {
 		compatibilityFlags?: string[],
 		migrations?: WranglerConfig['migrations'],
 		observability?: WorkerObservability,
+		/** Nova Sites: a completion token from uploadAssetsOnly for this same manifest (skips the upload). */
+		preparedCompletionJwt?: string,
 	): Promise<void> {
 		logger.info('🚀 Starting deployment process...');
 		logger.info(`📦 Worker: ${scriptName}`);
@@ -48,9 +80,11 @@ export class WorkerDeployer {
 			logger.info(`🎯 Dispatch Namespace: ${dispatchNamespace}`);
 		}
 
-		// Step 1: Create asset upload session
+		// Step 1: Create asset upload session (Nova Sites: skipped when pre-uploaded)
 		logger.info('\n📤 Creating asset upload session...');
-		const uploadSession = await this.api.createAssetUploadSession(
+		const uploadSession = preparedCompletionJwt
+			? { jwt: preparedCompletionJwt, buckets: [] as string[][] }
+			: await this.api.createAssetUploadSession(
 			scriptName,
 			assetsManifest,
 			dispatchNamespace,

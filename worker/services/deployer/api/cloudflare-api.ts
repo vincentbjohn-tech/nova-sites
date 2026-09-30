@@ -308,6 +308,32 @@ export class CloudflareAPI {
 		}
 	}
 
+	/** Switch a Worker's workers.dev address on or off (Nova Sites Unpublish keeps the code). */
+	async setWorkersDev(scriptName: string, enabled: boolean): Promise<void> {
+		const response = await fetch(
+			`${this.baseUrl}/accounts/${this.accountId}/workers/scripts/${encodeURIComponent(scriptName)}/subdomain`,
+			{
+				method: 'POST',
+				headers: this.getHeaders('application/json'),
+				body: JSON.stringify({ enabled }),
+			},
+		);
+		if (!response.ok) {
+			throw new Error(`Failed to switch workers.dev URL: ${response.status} - ${await response.text()}`);
+		}
+	}
+
+	/** Delete a Worker (a site's old address after a rename). A missing Worker is fine. */
+	async deleteWorker(scriptName: string): Promise<void> {
+		const response = await fetch(
+			`${this.baseUrl}/accounts/${this.accountId}/workers/scripts/${encodeURIComponent(scriptName)}?force=true`,
+			{ method: 'DELETE', headers: this.getHeaders() },
+		);
+		if (!response.ok && response.status !== 404) {
+			throw new Error(`Failed to delete worker: ${response.status} - ${await response.text()}`);
+		}
+	}
+
 	async getWorkersDevSubdomain(): Promise<string> {
 		const response = await fetch(
 			`${this.baseUrl}/accounts/${this.accountId}/workers/subdomain`,

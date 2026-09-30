@@ -29,9 +29,19 @@ import type { ThinkAgentConfig } from '../../think/ThinkAgent';
 import { withDurableObjectResetRetry } from '../../think/space-workspace-ops';
 import { THINK_MODEL_CONFIG, THINK_MODEL_ID } from '../../think/model-config';
 import { resolveNovaGatewayModel } from '../../think/nova-gateway';
+import {
+	isEditableSource,
+	OWNER_COMMIT_PREFIX,
+	replaceVisibleText,
+	setHeadMeta,
+	toHistory,
+	type SiteMeta,
+	type SourceFile,
+} from '../../think/nova-edits';
+import { CloudflareAPI } from '../../../services/deployer/api/cloudflare-api';
 import type { BranchDeploymentBundle } from '@space-do/space';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
-import { deployThinkBundleToUserAccount, deployThinkBundleToWorkersDev, resolveSiteScriptName } from '../../../services/deployer/think-user-deploy';
+import { deployThinkBundleToUserAccount, deployThinkBundleToWorkersDev, isReservedSiteName, prewarmSiteAssets, resolveSiteScriptName, sanitizeWorkerName } from '../../../services/deployer/think-user-deploy';
 import { resolveCloudflareAccessToken } from '../../../services/rate-limit/usageChecker';
 import type { CloudflareDeploymentErrorCode } from '../../../api/websocketTypes';
 
@@ -60,6 +70,8 @@ type SpaceRpcStub = {
 	) => Promise<{ preview_url?: string; commit_hash?: string; error?: string; details?: string }>;
 	getDeploymentBundle: (branch: string) => Promise<BranchDeploymentBundle>;
 	rollbackToCommit: (branch: string, commitHash: string) => Promise<unknown>;
+	glob: (pattern: string) => Promise<string[]>;
+	gitLog: (limit?: number) => Promise<{ oid: string; message: string; author?: { timestamp?: number } }[]>;
 };
 
 /** Subset of AI-SDK `UIMessageChunk` shapes this behavior reacts to. */
@@ -487,8 +499,15 @@ export class ThinkCodingBehavior
 			this.setState({ ...this.state, pendingUserInputs: [] });
 
 			const compiled = pending.join('\n');
+			const headBefore = await this.novaHead().catch(() => null);
 			try {
 				await this.runPrompt(compiled);
+				await this.callSpace((space) => space.gitCommit('chore: think turn changes')).catch(() => undefined);
+				const headAfter = await this.novaHead().catch(() => null);
+				if (headAfter && headAfter !== headBefore) {
+					this.novaLabel(headAfter, compiled);
+					this.novaPrewarm();
+				}
 			} catch (e) {
 				this.logger.error('Think prompt failed', e);
 				this.broadcast(WebSocketMessageResponses.ERROR, {
@@ -1024,7 +1043,9 @@ export class ThinkCodingBehavior
 			} catch (error) {
 				this.logger.debug('No new workspace changes to commit before publishing', error);
 			}
+			const bundleStarted = Date.now();
 			const bundle = await this.callSpace((space) => space.getDeploymentBundle(branch));
+			this.logger.info('nova_publish_bundle', { bundleMs: Date.now() - bundleStarted });
 			const apps = new AppService(this.env);
 			const scriptName = await resolveSiteScriptName({
 				appId: instanceId,
@@ -1032,7 +1053,12 @@ export class ThinkCodingBehavior
 				title: this.state.blueprint.title || this.state.projectName || `site-${instanceId}`,
 				ownerOf: (name) => apps.getAppOwnershipByDeploymentId(name),
 			});
-			const result = await deployThinkBundleToWorkersDev({ accountId, apiToken, scriptName, bundle });
+			const subdomain = (this.env as unknown as { NOVA_SITES_SUBDOMAIN?: string }).NOVA_SITES_SUBDOMAIN || undefined;
+			const alreadyLive = !this.state.novaUnpublished && this.state.cloudflareDeploymentUrl === `https://${scriptName}.${subdomain}.workers.dev`;
+			const prepared = this.novaPrepared;
+			const preparedCompletionJwt =
+				prepared && prepared.commitHash === bundle.commitHash && Date.now() - prepared.at < 30 * 60_000 ? prepared.jwt : undefined;
+			const result = await deployThinkBundleToWorkersDev({ accountId, apiToken, scriptName, bundle, subdomain, alreadyLive, preparedCompletionJwt });
 			await new AppService(this.env).updateDeploymentId(instanceId, result.deploymentId);
 			this.setState({ ...this.state, cloudflareDeploymentUrl: result.deploymentUrl });
 			this.broadcast(WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_COMPLETED, {
@@ -1052,6 +1078,158 @@ export class ThinkCodingBehavior
 			});
 			return null;
 		}
+	}
+
+	// ──────────────────────────────────────────────────────────────
+	// Nova Sites: the owner's own changes (no agent), History, Undo,
+	// publishing at <name>.novasites.workers.dev.
+
+	private async novaHead(): Promise<string | null> {
+		const log = await this.callSpace((space) => space.gitLog(1));
+		return log[0]?.oid ?? null;
+	}
+
+	private novaLabel(hash: string | null, label: string): void {
+		if (!hash) return;
+		const text = label.replace(/\s+/g, ' ').trim();
+		const short = text.length > 90 ? `${text.slice(0, 87)}…` : text;
+		this.setState({ ...this.state, novaLabels: { ...(this.state.novaLabels ?? {}), [hash]: short } });
+	}
+
+	/** The pre-uploaded files' receipt for one commit (asset upload tokens last about an hour). */
+	private novaPrepared: { commitHash: string; jwt: string; at: number } | null = null;
+
+	/** After a change to a published site: upload its changed files now, so Publish is fast. */
+	private novaPrewarm(): void {
+		void (async () => {
+			const scriptName = await new AppService(this.env).getDeploymentIdForApp(this.getAgentId());
+			if (!scriptName) return;
+			const started = Date.now();
+			const bundle = await this.callSpace((space) => space.getDeploymentBundle(this.state.currentBranch || 'main'));
+			const prepared = await prewarmSiteAssets({
+				accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
+				apiToken: this.env.CLOUDFLARE_API_TOKEN,
+				scriptName,
+				bundle,
+			});
+			if (prepared) this.novaPrepared = { commitHash: prepared.commitHash, jwt: prepared.completionJwt, at: Date.now() };
+			this.logger.info('nova_publish_prewarmed', { uploaded: prepared?.uploaded ?? 0, ms: Date.now() - started });
+		})().catch((e) => this.logger.warn('nova_publish_prewarm_failed', e));
+	}
+
+	private async novaSourceFiles(): Promise<SourceFile[]> {
+		const paths = (await this.callSpace((space) => space.glob('**/*'))).filter(isEditableSource);
+		return Promise.all(paths.map(async (path) => ({ path, content: await this.callSpace((space) => space.readFile(path)) })));
+	}
+
+	/** Write one file as the owner's change: commit it with their words, redeploy the preview. */
+	private async novaCommitOwnerChange(path: string, content: string, label: string) {
+		if (this.isCodeGenerating()) throw new Error('busy');
+		await this.callSpace((space) => space.writeFile(path, content));
+		await this.callSpace((space) => space.gitCommit(`${OWNER_COMMIT_PREFIX}${label}`));
+		const previewUrl = await this.deployCurrentBranch();
+		const hash = await this.novaHead();
+		this.novaLabel(hash, label);
+		this.novaPrewarm();
+		return { hash, previewUrl };
+	}
+
+	async novaTextEdit(find: string, replace: string, path?: string) {
+		const started = Date.now();
+		const result = replaceVisibleText(await this.novaSourceFiles(), find, replace, path);
+		if (!result.ok) return { error: result.error };
+		const shortFind = find.length > 40 ? `${find.slice(0, 37)}…` : find;
+		const shortReplace = replace.length > 40 ? `${replace.slice(0, 37)}…` : replace;
+		const done = await this.novaCommitOwnerChange(result.path, result.content, `Changed “${shortFind}” to “${shortReplace}”`);
+		return { path: result.path, ...done, ms: Date.now() - started };
+	}
+
+	async novaSetMeta(meta: SiteMeta) {
+		const path = 'public/index.html';
+		const html = await this.callSpace((space) => space.readFile(path));
+		return this.novaCommitOwnerChange(path, setHeadMeta(html, meta), 'Updated how the site shows on Google and when shared');
+	}
+
+	async novaHistory() {
+		const log = await this.callSpace((space) => space.gitLog(200));
+		return toHistory(log, this.state.novaLabels ?? {});
+	}
+
+	async novaRestore(hash: string) {
+		if (this.isCodeGenerating()) throw new Error('busy');
+		const branch = this.state.currentBranch || 'main';
+		const output = await this.callSpace((space) => space.rollbackToCommit(branch, hash));
+		await this.handleDeploySpaceOutput(output);
+		const head = await this.novaHead();
+		const restored = this.state.novaLabels?.[hash];
+		this.novaLabel(head, restored ? `Went back to: ${restored}` : 'Went back to an earlier version');
+		this.novaPrewarm();
+		return { hash: head, previewUrl: await this.getBrowserPreviewURL() };
+	}
+
+	/** Commits after the live one, oldest first: what Publish would put live. */
+	async novaUnpublished() {
+		const history = await this.novaHistory();
+		const live = this.state.novaPublishedHash;
+		const index = live ? history.findIndex((e) => e.hash === live) : history.length;
+		return (index === -1 ? history : history.slice(0, index)).reverse().map(({ hash, message }) => ({ hash, message }));
+	}
+
+	async novaPublish() {
+		const started = Date.now();
+		const head = await this.novaHead();
+		const result = await this.deployToCloudflare();
+		if (!result?.deploymentUrl) throw new Error('publish_failed');
+		this.setState({ ...this.state, novaPublishedHash: head ?? undefined, novaUnpublished: false });
+		return { url: result.deploymentUrl, seconds: Math.round((Date.now() - started) / 100) / 10 };
+	}
+
+	async novaUnpublish() {
+		const name = await new AppService(this.env).getDeploymentIdForApp(this.getAgentId());
+		if (name) {
+			await new CloudflareAPI(this.env.CLOUDFLARE_ACCOUNT_ID, this.env.CLOUDFLARE_API_TOKEN).setWorkersDev(name, false);
+		}
+		this.setState({ ...this.state, novaUnpublished: true });
+		return { ok: true };
+	}
+
+	/** Rename the free address: publish under the new name, then retire the old Worker. */
+	async novaSetAddress(requested: string) {
+		const apps = new AppService(this.env);
+		const name = sanitizeWorkerName(requested);
+		if (name !== requested.toLowerCase() || isReservedSiteName(name)) return { error: 'invalid' as const };
+		const owner = await apps.getAppOwnershipByDeploymentId(name);
+		if (owner && owner.id !== this.getAgentId()) return { error: 'taken' as const };
+		const previous = await apps.getDeploymentIdForApp(this.getAgentId());
+		if (previous === name) return { url: this.state.cloudflareDeploymentUrl ?? null };
+		const branch = this.state.currentBranch || 'main';
+		const bundle = await this.callSpace((space) => space.getDeploymentBundle(branch));
+		const result = await deployThinkBundleToWorkersDev({
+			accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
+			apiToken: this.env.CLOUDFLARE_API_TOKEN,
+			scriptName: name,
+			bundle,
+		});
+		await apps.updateDeploymentId(this.getAgentId(), result.deploymentId);
+		if (previous) {
+			await new CloudflareAPI(this.env.CLOUDFLARE_ACCOUNT_ID, this.env.CLOUDFLARE_API_TOKEN).deleteWorker(previous);
+		}
+		this.setState({ ...this.state, cloudflareDeploymentUrl: result.deploymentUrl, novaPublishedHash: (await this.novaHead()) ?? undefined });
+		return { url: result.deploymentUrl };
+	}
+
+	async novaSummary() {
+		const address = this.state.novaUnpublished ? null : this.state.cloudflareDeploymentUrl ?? null;
+		return {
+			id: this.getAgentId(),
+			title: this.state.blueprint?.title || this.state.projectName || 'Your site',
+			address,
+			status: address ? ('live' as const) : ('draft' as const),
+			building: this.isCodeGenerating(),
+			previewUrl: await this.getBrowserPreviewURL(),
+			unpublished: await this.novaUnpublished(),
+			files: (await this.callSpace((space) => space.glob('**/*'))).filter((p) => !p.startsWith('.think/')),
+		};
 	}
 }
 

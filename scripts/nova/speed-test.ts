@@ -6,7 +6,7 @@
  *   bun scripts/nova/speed-test.ts <baseUrl> <apiKeyFile> <outDir> ["prompt"] ["edit"]
  */
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
-import { AgenticClient } from '../../sdk/src/index';
+import { VibeClient } from '../../sdk/src/index';
 
 const [baseUrl, keyFile, outDir, promptArg, editArg] = process.argv.slice(2);
 if (!baseUrl || !keyFile || !outDir) {
@@ -21,7 +21,7 @@ const log = `${outDir}/messages.jsonl`;
 writeFileSync(log, '');
 const apiKey = JSON.parse(readFileSync(keyFile, 'utf8')).data.key as string;
 
-const client = new AgenticClient({ baseUrl, apiKey });
+const client = new VibeClient({ baseUrl, apiKey });
 const t0 = Date.now();
 const secs = () => ((Date.now() - t0) / 1000).toFixed(1);
 const marks: Record<string, string> = {};
@@ -35,7 +35,7 @@ function mark(name: string) {
 }
 
 async function run() {
-	const session = await client.build(prompt, { behaviorType: 'agentic', projectType: 'app' });
+	const session = await client.build(prompt, { behaviorType: 'think', projectType: 'app' });
 	mark('build_created');
 	console.log(`agentId=${session.agentId}`);
 	let phase = 'build';

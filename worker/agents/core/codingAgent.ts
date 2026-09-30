@@ -420,6 +420,37 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
         return this.behavior.deployToCloudflare(target);
     }
 
+    // Nova Sites: the owner's own changes, History/Undo and publishing, called
+    // from /api/nova/sites. Only think sites have them.
+
+    private novaBehavior(): ThinkCodingBehavior {
+        if (!(this.behavior instanceof ThinkCodingBehavior)) throw new Error('not_a_nova_site');
+        return this.behavior;
+    }
+
+    novaSummary() { return this.novaBehavior().novaSummary(); }
+    novaTextEdit(find: string, replace: string, path?: string) { return this.novaBehavior().novaTextEdit(find, replace, path); }
+    novaSetMeta(meta: Parameters<ThinkCodingBehavior['novaSetMeta']>[0]) { return this.novaBehavior().novaSetMeta(meta); }
+    novaHistory() { return this.novaBehavior().novaHistory(); }
+    novaRestore(hash: string) { return this.novaBehavior().novaRestore(hash); }
+    novaPublish() { return this.novaBehavior().novaPublish(); }
+    novaUnpublish() { return this.novaBehavior().novaUnpublish(); }
+    novaSetAddress(name: string) { return this.novaBehavior().novaSetAddress(name); }
+
+    /** Start the first build (what the SDK's `generate_all` does over the WebSocket). */
+    novaStartBuild(): void {
+        this.setState({ ...this.state, shouldBeGenerating: true });
+        if (this.behavior.isCodeGenerating()) return;
+        this.behavior.generateAllFiles().catch((error) => {
+            this.logger().error('Nova build failed to start', error);
+        });
+    }
+
+    /** A follow-up request to Nova's agent (the SDK's `user_suggestion`). */
+    async novaFollowUp(text: string): Promise<void> {
+        await this.handleUserInput(text);
+    }
+
     deployProject(options?: DeployOptions): Promise<DeployResult> {
         return this.objective.deploy(options);
     }

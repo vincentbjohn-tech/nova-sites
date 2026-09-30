@@ -142,6 +142,7 @@ async function deployArtifacts(
 	deployer: WorkerDeployer,
 	artifacts: ThinkBundleArtifacts,
 	dispatchNamespace: string | undefined,
+	preparedCompletionJwt?: string,
 ): Promise<void> {
 	if (artifacts.assets) {
 		await deployer.deployWithAssets(
@@ -158,6 +159,7 @@ async function deployArtifacts(
 			undefined,
 			artifacts.migration,
 			OBSERVABILITY,
+			preparedCompletionJwt,
 		);
 	} else {
 		await deployer.deploySimple(
@@ -218,7 +220,11 @@ export async function deployThinkBundleToPlatform(input: {
 }
 
 /** Workers on the account that are not sites: a site can never take their name. */
-const RESERVED_SITE_NAMES = new Set(['builder', 'nova-sites-test', 'www', 'api', 'admin']);
+const RESERVED_SITE_NAMES = new Set(['builder', 'media', 'nova-sites-test', 'www', 'api', 'admin']);
+
+export function isReservedSiteName(name: string): boolean {
+	return RESERVED_SITE_NAMES.has(name);
+}
 
 /**
  * Pick the site's address name: the one it already has, else its title made
@@ -251,15 +257,41 @@ export async function deployThinkBundleToWorkersDev(input: {
 	apiToken: string;
 	scriptName: string;
 	bundle: BranchDeploymentBundle;
+	/** Known account subdomain and an address already switched on: skip both lookups (republish). */
+	subdomain?: string;
+	alreadyLive?: boolean;
+	/** From prewarmSiteAssets for this same commit: Publish skips the upload round trips. */
+	preparedCompletionJwt?: string;
 }): Promise<ThinkUserDeploymentResult> {
+	const t0 = Date.now();
 	const artifacts = await buildThinkBundleArtifacts(input.bundle, input.scriptName);
+	const t1 = Date.now();
 	const deployer = new WorkerDeployer(input.accountId, input.apiToken);
-	await deployArtifacts(deployer, artifacts, undefined);
+	await deployArtifacts(deployer, artifacts, undefined, input.preparedCompletionJwt);
+	const t2 = Date.now();
 	const api = new CloudflareAPI(input.accountId, input.apiToken);
-	await api.enableWorkersDev(artifacts.scriptName);
-	const subdomain = await api.getWorkersDevSubdomain();
+	if (!input.alreadyLive) await api.enableWorkersDev(artifacts.scriptName);
+	const subdomain = input.subdomain ?? (await api.getWorkersDevSubdomain());
+	console.log(JSON.stringify({ event: 'nova_publish_timing', artifactsMs: t1 - t0, uploadMs: t2 - t1, addressMs: Date.now() - t2 }));
 	return {
 		deploymentId: artifacts.scriptName,
 		deploymentUrl: `https://${artifacts.scriptName}.${subdomain}.workers.dev`,
 	};
+}
+
+/** Nova Sites: pre-upload a site's changed files so the next Publish is only a version swap. */
+export async function prewarmSiteAssets(input: {
+	accountId: string;
+	apiToken: string;
+	scriptName: string;
+	bundle: BranchDeploymentBundle;
+}): Promise<{ uploaded: number; completionJwt: string; commitHash: string } | null> {
+	const artifacts = await buildThinkBundleArtifacts(input.bundle, input.scriptName);
+	if (!artifacts.assets) return null;
+	const result = await new WorkerDeployer(input.accountId, input.apiToken).uploadAssetsOnly(
+		artifacts.scriptName,
+		artifacts.assets,
+		artifacts.assetContents,
+	);
+	return { ...result, commitHash: input.bundle.commitHash };
 }

@@ -1,0 +1,8 @@
+{
+	// Nova Sites media: photos and videos from the owner's library, served from R2.
+	"name": "media",
+	"main": "index.ts",
+	"compatibility_date": "2026-05-23",
+	"workers_dev": true,
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "nova-sites-media" }]
+}

@@ -580,6 +580,16 @@ export class AppService extends BaseService {
         return { success: true, app: updatedApps[0] };
     }
 
+    /** The app's owner (null when the app does not exist or is anonymous). */
+    async getAppOwnerId(appId: string): Promise<string | null> {
+        const row = await this.database
+            .select({ userId: schema.apps.userId })
+            .from(schema.apps)
+            .where(eq(schema.apps.id, appId))
+            .limit(1);
+        return row[0]?.userId ?? null;
+    }
+
     /** The app's published Worker name (its site address), if it has one. */
     async getDeploymentIdForApp(appId: string): Promise<string | null> {
         const row = await this.database

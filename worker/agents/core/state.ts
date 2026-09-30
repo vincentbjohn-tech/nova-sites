@@ -136,6 +136,12 @@ export interface ThinkState extends BaseProjectState {
     /** Last commit SHA we successfully deployed. */
     lastDeployedCommit?: string;
     cloudflareDeploymentUrl?: string;
+    /** Nova Sites: History labels by commit (what was asked, or what the owner changed). */
+    novaLabels?: Record<string, string>;
+    /** Nova Sites: the commit that is live at the site's address. */
+    novaPublishedHash?: string;
+    /** Nova Sites: the site's address is switched off (Unpublish); nothing deleted. */
+    novaUnpublished?: boolean;
 }
 
 export type AgentState = PhasicState | AgenticState | ThinkState;
