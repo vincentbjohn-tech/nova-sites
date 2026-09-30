@@ -56,3 +56,4 @@ debug-tools/presentation-tester
 .test-data
 cli
 tsconfig.tsbuildinfo
+.dev.log

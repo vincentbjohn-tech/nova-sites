@@ -56,6 +56,7 @@ export function getAllowedOrigins(env: Env): string[] {
     if (isDev(env)) {
         origins.push('http://localhost:3000');
         origins.push('http://localhost:5173');
+        if (env.DEV_BROWSER_PREVIEW_ORIGIN) origins.push(env.DEV_BROWSER_PREVIEW_ORIGIN);
         origins.push('http://localhost:8787');
         origins.push('http://127.0.0.1:3000');
         origins.push('http://127.0.0.1:5173');

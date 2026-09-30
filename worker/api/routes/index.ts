@@ -18,6 +18,7 @@ import { setupLimitsRoutes } from './limitsRoutes';
 import { Hono } from "hono";
 import { AppEnv } from "../../types/appenv";
 import { setupStatusRoutes } from './statusRoutes';
+import { setupNovaRoutes } from './novaRoutes';
 
 export function setupRoutes(app: Hono<AppEnv>): void {
     // Health check route
@@ -36,6 +37,9 @@ export function setupRoutes(app: Hono<AppEnv>): void {
 
     // Authentication and user management routes
     setupAuthRoutes(app);
+
+    // Sign-in from Nova OS
+    setupNovaRoutes(app);
     // Cloudflare "Connect" OAuth routes (for per-user AI Gateway tokens)
     setupCloudflareConnectRoutes(app);
     // Cloudflare account and gateway management routes

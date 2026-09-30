@@ -216,3 +216,50 @@ export async function deployThinkBundleToPlatform(input: {
 		deploymentUrl: `https://${artifacts.scriptName}.${input.previewDomain}`,
 	};
 }
+
+/** Workers on the account that are not sites: a site can never take their name. */
+const RESERVED_SITE_NAMES = new Set(['builder', 'nova-sites-test', 'www', 'api', 'admin']);
+
+/**
+ * Pick the site's address name: the one it already has, else its title made
+ * address-safe, numbered when another app (or a reserved Worker) holds it.
+ */
+export async function resolveSiteScriptName(input: {
+	appId: string;
+	existing: string | null | undefined;
+	title: string;
+	ownerOf: (name: string) => Promise<{ id: string } | null>;
+}): Promise<string> {
+	if (input.existing) return input.existing;
+	const base = sanitizeWorkerName(input.title).slice(0, 56).replace(/-+$/, '') || 'site';
+	for (let n = 1; n < 100; n++) {
+		const candidate = n === 1 ? base : `${base}-${n}`;
+		if (RESERVED_SITE_NAMES.has(candidate)) continue;
+		const owner = await input.ownerOf(candidate);
+		if (!owner || owner.id === input.appId) return candidate;
+	}
+	throw new Error(`No free site address for "${input.title}"`);
+}
+
+/**
+ * Nova Sites: publish a think bundle as its own Worker + static assets in the
+ * platform account, live at `<name>.<account subdomain>.workers.dev` (no
+ * Workers for Platforms, never the user's own account).
+ */
+export async function deployThinkBundleToWorkersDev(input: {
+	accountId: string;
+	apiToken: string;
+	scriptName: string;
+	bundle: BranchDeploymentBundle;
+}): Promise<ThinkUserDeploymentResult> {
+	const artifacts = await buildThinkBundleArtifacts(input.bundle, input.scriptName);
+	const deployer = new WorkerDeployer(input.accountId, input.apiToken);
+	await deployArtifacts(deployer, artifacts, undefined);
+	const api = new CloudflareAPI(input.accountId, input.apiToken);
+	await api.enableWorkersDev(artifacts.scriptName);
+	const subdomain = await api.getWorkersDevSubdomain();
+	return {
+		deploymentId: artifacts.scriptName,
+		deploymentUrl: `https://${artifacts.scriptName}.${subdomain}.workers.dev`,
+	};
+}

@@ -28,9 +28,10 @@ import { getConfigurationForModel } from '../../inferutils/core';
 import type { ThinkAgentConfig } from '../../think/ThinkAgent';
 import { withDurableObjectResetRetry } from '../../think/space-workspace-ops';
 import { THINK_MODEL_CONFIG, THINK_MODEL_ID } from '../../think/model-config';
+import { resolveNovaGatewayModel } from '../../think/nova-gateway';
 import type { BranchDeploymentBundle } from '@space-do/space';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
-import { deployThinkBundleToPlatform, deployThinkBundleToUserAccount } from '../../../services/deployer/think-user-deploy';
+import { deployThinkBundleToUserAccount, deployThinkBundleToWorkersDev, resolveSiteScriptName } from '../../../services/deployer/think-user-deploy';
 import { resolveCloudflareAccessToken } from '../../../services/rate-limit/usageChecker';
 import type { CloudflareDeploymentErrorCode } from '../../../api/websocketTypes';
 
@@ -218,6 +219,17 @@ export class ThinkCodingBehavior
 		const inf = this.getInferenceContext();
 		const userId = this.state.metadata.userId;
 
+		const novaGateway = resolveNovaGatewayModel(this.env);
+		if (novaGateway) {
+			await this.pushThinkConfig({
+				userId,
+				model: { ...novaGateway, useStoredKeys: false },
+				systemPrompt: this.buildSystemPrompt(novaGateway.modelName, 'nova-gateway'),
+				previewUrl: await this.getBrowserPreviewURL(0).catch(() => undefined),
+			});
+			return;
+		}
+
 		const modelName = THINK_MODEL_ID;
 		const aiModelConfig = THINK_MODEL_CONFIG;
 
@@ -280,7 +292,10 @@ export class ThinkCodingBehavior
 			systemPrompt: this.buildSystemPrompt(modelName, aiModelConfig.provider),
 			previewUrl: await this.getBrowserPreviewURL(0).catch(() => undefined),
 		};
+		await this.pushThinkConfig(config);
+	}
 
+	private async pushThinkConfig(config: ThinkAgentConfig): Promise<void> {
 		try {
 			const stub = await this.getThinkStub();
 			await stub.configureVibe(config);
@@ -363,7 +378,7 @@ export class ThinkCodingBehavior
 	}
 
 	private async getPublicOrigin(): Promise<string> {
-		if (isDev(this.env)) return 'http://localhost:5173';
+		if (isDev(this.env)) return this.env.DEV_BROWSER_PREVIEW_ORIGIN || 'http://localhost:5173';
 		if (isSeparatePreviewDomain(this.env)) {
 			return `https://${getPreviewDomain(this.env)}`;
 		}
@@ -987,8 +1002,9 @@ export class ThinkCodingBehavior
 	}
 
 	/**
-	 * Default think deploy when `ENABLE_USER_ACCOUNT_DEPLOY` is off: publish the
-	 * SpaceDO bundle to the platform's dispatch namespace with platform creds.
+	 * Default think deploy when `ENABLE_USER_ACCOUNT_DEPLOY` is off (Nova Sites):
+	 * publish the SpaceDO bundle as its own Worker at `<name>.novasites.workers.dev`
+	 * with platform creds.
 	 */
 	private async deployThinkAppToPlatform(): Promise<{ deploymentUrl?: string; workersUrl?: string } | null> {
 		const instanceId = this.getAgentId();
@@ -1002,12 +1018,6 @@ export class ThinkCodingBehavior
 			if (!accountId || !apiToken) {
 				throw new Error('CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must be set in environment');
 			}
-			const dispatchNamespace = (this.env as unknown as { DISPATCH_NAMESPACE?: string })
-				.DISPATCH_NAMESPACE;
-			if (!dispatchNamespace) {
-				throw new Error('DISPATCH_NAMESPACE not found in environment variables, cannot deploy without dispatch namespace');
-			}
-
 			const branch = this.state.currentBranch || 'main';
 			try {
 				await this.callSpace((space) => space.gitCommit('deploy: publish to platform'));
@@ -1015,14 +1025,14 @@ export class ThinkCodingBehavior
 				this.logger.debug('No new workspace changes to commit before publishing', error);
 			}
 			const bundle = await this.callSpace((space) => space.getDeploymentBundle(branch));
-			const result = await deployThinkBundleToPlatform({
-				accountId,
-				apiToken,
-				dispatchNamespace,
-				previewDomain: getPreviewDomain(this.env),
-				appName: this.state.blueprint.title || this.state.projectName || `vibe-${instanceId}`,
-				bundle,
+			const apps = new AppService(this.env);
+			const scriptName = await resolveSiteScriptName({
+				appId: instanceId,
+				existing: await apps.getDeploymentIdForApp(instanceId),
+				title: this.state.blueprint.title || this.state.projectName || `site-${instanceId}`,
+				ownerOf: (name) => apps.getAppOwnershipByDeploymentId(name),
 			});
+			const result = await deployThinkBundleToWorkersDev({ accountId, apiToken, scriptName, bundle });
 			await new AppService(this.env).updateDeploymentId(instanceId, result.deploymentId);
 			this.setState({ ...this.state, cloudflareDeploymentUrl: result.deploymentUrl });
 			this.broadcast(WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_COMPLETED, {

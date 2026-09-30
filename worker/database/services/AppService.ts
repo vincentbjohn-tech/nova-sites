@@ -580,6 +580,16 @@ export class AppService extends BaseService {
         return { success: true, app: updatedApps[0] };
     }
 
+    /** The app's published Worker name (its site address), if it has one. */
+    async getDeploymentIdForApp(appId: string): Promise<string | null> {
+        const row = await this.database
+            .select({ deploymentId: schema.apps.deploymentId })
+            .from(schema.apps)
+            .where(eq(schema.apps.id, appId))
+            .limit(1);
+        return row[0]?.deploymentId ?? null;
+    }
+
     /**
      * Resolve the owning app for a deployed worker by its deployment id
      * (the subdomain used by the dispatch namespace equals `deploymentId`).
