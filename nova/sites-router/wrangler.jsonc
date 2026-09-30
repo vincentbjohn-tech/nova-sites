@@ -1,0 +1,14 @@
+{
+	// Nova Sites router: owners' own domains (Cloudflare for SaaS custom hostnames on
+	// try-atlas.ai) and try-atlas.ai subdomains are served here, each mapped to its site's
+	// Worker at <name>.novasites.workers.dev. The map is the DOMAINS KV (host -> site name),
+	// written by Nova OS when a domain goes live.
+	"name": "sites-router",
+	"main": "index.ts",
+	"compatibility_date": "2026-05-23",
+	"workers_dev": false,
+	// Until Cloudflare for SaaS is on for the zone, only its own subdomains; then add { "pattern": "*/*", "zone_name": "try-atlas.ai" }.
+	"routes": [{ "pattern": "*.try-atlas.ai/*", "zone_name": "try-atlas.ai" }],
+	"kv_namespaces": [{ "binding": "DOMAINS", "id": "5d710b233205484498b20239a5aaaf92" }],
+	"vars": { "SITES_SUBDOMAIN": "novasites" }
+}
