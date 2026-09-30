@@ -1047,7 +1047,17 @@ export class ThinkCodingBehavior
 				this.logger.debug('No new workspace changes to commit before publishing', error);
 			}
 			const bundleStarted = Date.now();
-			const bundle = await this.callSpace((space) => space.getDeploymentBundle(branch));
+			// Publish exactly the newest saved version: right after an edit the
+			// workspace can still hand back the previous build for a moment.
+			const head = await this.novaHead().catch(() => null);
+			let bundle = await this.callSpace((space) => space.getDeploymentBundle(branch));
+			for (let tries = 0; head && bundle.commitHash !== head && tries < 20; tries++) {
+				await new Promise((r) => setTimeout(r, 300));
+				bundle = await this.callSpace((space) => space.getDeploymentBundle(branch));
+			}
+			if (head && bundle.commitHash !== head) {
+				this.logger.warn('nova_publish_stale_bundle', { head, bundle: bundle.commitHash });
+			}
 			this.logger.info('nova_publish_bundle', { bundleMs: Date.now() - bundleStarted });
 			const apps = new AppService(this.env);
 			const scriptName = await resolveSiteScriptName({
