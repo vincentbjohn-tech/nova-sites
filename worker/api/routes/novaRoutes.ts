@@ -16,6 +16,7 @@ export function setupNovaRoutes(app: Hono<AppEnv>): void {
     const auth = setAuthLevel(AuthConfig.authenticated);
     novaRouter.get('/sites', auth, adaptController(S, S.list));
     novaRouter.post('/sites', auth, adaptController(S, S.create));
+    novaRouter.post('/sites/import', auth, adaptController(S, S.importSite));
     novaRouter.get('/sites/:id', auth, adaptController(S, S.get));
     novaRouter.post('/sites/:id/message', auth, adaptController(S, S.message));
     novaRouter.post('/sites/:id/text', auth, adaptController(S, S.text));

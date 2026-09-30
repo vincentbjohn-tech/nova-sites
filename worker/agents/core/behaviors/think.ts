@@ -73,6 +73,7 @@ type SpaceRpcStub = {
 	rollbackToCommit: (branch: string, commitHash: string) => Promise<unknown>;
 	glob: (pattern: string) => Promise<string[]>;
 	gitLog: (limit?: number) => Promise<{ oid: string; message: string; author?: { timestamp?: number } }[]>;
+	mkdir: (path: string, opts?: { recursive?: boolean }) => Promise<void>;
 };
 
 /** Subset of AI-SDK `UIMessageChunk` shapes this behavior reacts to. */
@@ -1236,6 +1237,38 @@ export class ThinkCodingBehavior
 		}
 		this.setState({ ...this.state, cloudflareDeploymentUrl: result.deploymentUrl, novaPublishedHash: (await this.novaHead()) ?? undefined });
 		return { url: result.deploymentUrl };
+	}
+
+	/**
+	 * Bring an existing site in as it is (Nova OS's "Bring over your site"): write its
+	 * files, save them as one version in the owner's name, and show the preview. No
+	 * agent turn runs; the site is editable and publishable at once.
+	 */
+	async novaImport(files: Record<string, string>, title: string, label: string) {
+		if (this.isCodeGenerating()) throw new Error('busy');
+		const all = { ...files };
+		all['wrangler.json'] ??= JSON.stringify(
+			{
+				main: 'src/index.ts',
+				compatibility_date: '2025-04-01',
+				assets: { directory: './public', html_handling: 'auto-trailing-slash', not_found_handling: '404-page' },
+			},
+			null,
+			2,
+		);
+		all['src/index.ts'] ??= '// Everything is static: pages and styles are served from public/.\nexport default { async fetch() { return new Response("Not found", { status: 404 }); } };\n';
+		for (const [path, content] of Object.entries(all)) {
+			const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+			if (dir) await this.callSpace((space) => space.mkdir(dir, { recursive: true })).catch(() => undefined);
+			await this.callSpace((space) => space.writeFile(path, content));
+		}
+		await this.callSpace((space) => space.gitCommit(`${OWNER_COMMIT_PREFIX}${label}`));
+		this.setMVPGenerated();
+		await this.setTitle(title);
+		const previewUrl = await this.deployCurrentBranch();
+		const hash = await this.novaHead();
+		this.novaLabel(hash, label);
+		return { hash, previewUrl, files: Object.keys(all).length };
 	}
 
 	async novaSummary() {

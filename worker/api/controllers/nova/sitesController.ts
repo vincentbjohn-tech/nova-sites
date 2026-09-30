@@ -102,6 +102,57 @@ export class NovaSitesController extends BaseController {
 		return NovaSitesController.createSuccessResponse({ id: agentId });
 	}
 
+	/**
+	 * POST /api/nova/sites/import {title, files: {path: text}, label?} → {id, previewUrl}.
+	 * An existing site brought over as it is: a new site whose first version is these files.
+	 */
+	static async importSite(request: Request, env: Env, ctx: ExecutionContext, context: RouteContext): Promise<Response> {
+		const body = await NovaSitesController.body(request);
+		const title = NovaSitesController.str(body.title, 120)?.trim();
+		const label = NovaSitesController.str(body.label, 120)?.trim() || `Brought over ${title}`;
+		const files = body.files && typeof body.files === 'object' ? (body.files as Record<string, unknown>) : null;
+		if (!title || !files) return NovaSitesController.createErrorResponse('title and files are required', 400);
+		const entries = Object.entries(files);
+		let total = 0;
+		for (const [path, content] of entries) {
+			if (typeof content !== 'string' || !/^[A-Za-z0-9._\-/]+$/.test(path) || path.includes('..') || path.startsWith('/') || path.startsWith('.think')) {
+				return NovaSitesController.createErrorResponse(`Not a site file: ${path}`, 400);
+			}
+			total += content.length;
+		}
+		if (entries.length === 0 || entries.length > 400 || total > 12_000_000) {
+			return NovaSitesController.createErrorResponse('A site is 1–400 text files, up to 12 MB (photos go to the media library)', 400);
+		}
+		const forwarded = new Request(new URL('/api/agent', request.url), {
+			method: 'POST',
+			headers: request.headers,
+			body: JSON.stringify({ query: `${label}.`, behaviorType: 'think', projectType: 'app' }),
+		});
+		const response = await CodingAgentController.startCodeGeneration(forwarded, env, ctx, context);
+		if (!response.ok || !response.body) return response;
+		let agentId: string | undefined;
+		const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+		let buffer = '';
+		for (;;) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			buffer += value;
+			const lines = buffer.split('\n');
+			buffer = lines.pop() ?? '';
+			for (const line of lines) {
+				try {
+					agentId ??= (JSON.parse(line) as { agentId?: string }).agentId;
+				} catch {
+					// blueprint chunks and keep-alives
+				}
+			}
+		}
+		if (!agentId) return NovaSitesController.createErrorResponse('Could not start the site', 500);
+		const stub = await getAgentStub(env, agentId);
+		const result = await stub.novaImport(files as Record<string, string>, title, label);
+		return NovaSitesController.createSuccessResponse({ id: agentId, ...result });
+	}
+
 	/** GET /api/nova/sites/:id */
 	static async get(_request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
 		const stub = await NovaSitesController.ownedStub(env, context);

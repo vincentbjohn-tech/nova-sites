@@ -429,6 +429,7 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
     }
 
     novaSummary() { return this.novaBehavior().novaSummary(); }
+    novaImport(files: Record<string, string>, title: string, label: string) { return this.novaBehavior().novaImport(files, title, label); }
     novaTextEdit(find: string, replace: string, path?: string) { return this.novaBehavior().novaTextEdit(find, replace, path); }
     novaSetMeta(meta: Parameters<ThinkCodingBehavior['novaSetMeta']>[0]) { return this.novaBehavior().novaSetMeta(meta); }
     novaHistory() { return this.novaBehavior().novaHistory(); }
