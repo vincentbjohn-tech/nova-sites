@@ -51,6 +51,13 @@ export function getAllowedOrigins(env: Env): string[] {
     if (isSeparatePreviewDomain(env)) {
         origins.push(`https://${getPreviewDomain(env)}`);
     }
+
+    // Nova Sites: Nova OS drives the builder from its own pages (the SDK's
+    // WebSocket and the API), so its origins are allowed too.
+    const novaOs = (env as unknown as { NOVA_OS_ORIGINS?: string }).NOVA_OS_ORIGINS;
+    if (novaOs) {
+        for (const o of novaOs.split(',').map((x) => x.trim()).filter(Boolean)) origins.push(o);
+    }
     
     // Development origins (only in development)
     if (isDev(env)) {

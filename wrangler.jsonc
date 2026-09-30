@@ -89,7 +89,7 @@
 		{
 			"binding": "DB",
 			"database_name": "nova-sites-db",
-			"database_id": "00000000-0000-0000-0000-000000000000",
+			"database_id": "41c08ad6-2100-484e-ae41-9f7b6968939e",
 			"migrations_dir": "migrations"
 		}
 	],
