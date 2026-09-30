@@ -1191,8 +1191,13 @@ export class ThinkCodingBehavior
 	async novaPublish() {
 		const started = Date.now();
 		const head = await this.novaHead();
+		const firstTime = !this.state.cloudflareDeploymentUrl || this.state.novaUnpublished === true;
 		const result = await this.deployToCloudflare();
 		if (!result?.deploymentUrl) throw new Error('publish_failed');
+		// A new address takes Cloudflare a few seconds to a minute to switch on
+		// everywhere; until then it shows "There is nothing here yet". Only say
+		// "live" once the site itself answers there.
+		if (firstTime) await novaWaitUntilLive(result.deploymentUrl);
 		this.setState({ ...this.state, novaPublishedHash: head ?? undefined, novaUnpublished: false });
 		return { url: result.deploymentUrl, seconds: Math.round((Date.now() - started) / 100) / 10 };
 	}
@@ -1247,6 +1252,21 @@ export class ThinkCodingBehavior
 }
 
 // ───────────────────────────── helpers ─────────────────────────────
+
+/** Poll a just-published address until the site answers (not Cloudflare's placeholder); at most 90 s. */
+async function novaWaitUntilLive(url: string): Promise<void> {
+	const until = Date.now() + 90_000;
+	while (Date.now() < until) {
+		try {
+			const res = await fetch(`${url}/?nova_live_check=${Date.now()}`, { redirect: 'manual' });
+			const body = res.status === 200 ? await res.text() : '';
+			if (body && !body.includes('There is nothing here yet')) return;
+		} catch {
+			// not reachable yet
+		}
+		await new Promise((r) => setTimeout(r, 2000));
+	}
+}
 
 function pickStringField(obj: Record<string, unknown>, ...keys: string[]): string | undefined {
 	for (const k of keys) {
