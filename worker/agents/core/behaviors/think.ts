@@ -37,7 +37,8 @@ import {
 	readPageMeta,
 	replaceVisibleText,
 	setHeadMeta,
-	toHistory,
+	toNetHistory,
+	netUnpublished,
 	type SiteMeta,
 	type SourceFile,
 } from '../../think/nova-edits';
@@ -1210,7 +1211,7 @@ export class ThinkCodingBehavior
 
 	async novaHistory() {
 		const log = await this.callSpace((space) => space.gitLog(200));
-		return toHistory(log, this.state.novaLabels ?? {});
+		return toNetHistory(log, this.state.novaLabels ?? {});
 	}
 
 	/** Remember something the owner did by hand, so Nova's next turn knows (her conversation doesn't). */
@@ -1254,12 +1255,10 @@ export class ThinkCodingBehavior
 		return { hash: head, previewUrl: await this.getBrowserPreviewURL() };
 	}
 
-	/** Commits after the live one, oldest first: what Publish would put live. */
+	/** What Publish would change, oldest first: the net difference from the live version. */
 	async novaUnpublished() {
-		const history = await this.novaHistory();
-		const live = this.state.novaPublishedHash;
-		const index = live ? history.findIndex((e) => e.hash === live) : history.length;
-		return (index === -1 ? history : history.slice(0, index)).reverse().map(({ hash, message }) => ({ hash, message }));
+		const log = await this.callSpace((space) => space.gitLog(200));
+		return netUnpublished(log, this.state.novaLabels ?? {}, this.state.novaPublishedHash);
 	}
 
 	async novaPublish() {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { replaceVisibleText, setHeadMeta, readHeadMeta, readPageMeta, planMetaChanges, toHistory, isEditableSource, OWNER_COMMIT_PREFIX, markEarlierRequests, EARLIER_REQUEST_LABEL } from './nova-edits';
+import { replaceVisibleText, setHeadMeta, readHeadMeta, readPageMeta, planMetaChanges, toHistory, isEditableSource, OWNER_COMMIT_PREFIX, markEarlierRequests, EARLIER_REQUEST_LABEL, netUnpublished, toNetHistory } from './nova-edits';
 
 const html = `<!doctype html><html><head><title>Kristi Grace Hair</title></head><body>
   <h1>Hair that feels
@@ -202,5 +202,32 @@ describe('markEarlierRequests', () => {
 		]);
 		expect(out[4].content).toBe('Make the button say Book now');
 		expect(out[1].content).toBe('Added it.');
+	});
+});
+
+describe('netUnpublished', () => {
+	const c = (oid: string, message: string) => ({ oid, message, author: { timestamp: 1_800_000_000 } });
+	const labels = { f0000000: 'Start', a0000000: 'Say hi', b0000000: 'Meet Kristine', d0000000: 'Book now', e1000000: 'Went back to: Say hi', e2000000: 'Went back to: Start' };
+
+	it('lists nothing when the draft went back to the live version', () => {
+		const log = [c('e2000000', 'rollback: restore f0000000'), c('b0000000', 'x'), c('a0000000', 'x'), c('f0000000', 'x')].map((e) => e);
+		expect(netUnpublished(log, labels, 'f0000000')).toEqual([]);
+		expect(toNetHistory(log, labels).map((e) => e.message)).toEqual(['Start']);
+	});
+
+	it('drops an undone change and the restore itself', () => {
+		const log = [c('d0000000', 'x'), c('e1000000', 'rollback: restore a0000000'), c('b0000000', 'x'), c('a0000000', 'x'), c('f0000000', 'x')];
+		expect(netUnpublished(log, labels, 'f0000000').map((e) => e.message)).toEqual(['Say hi', 'Book now']);
+		expect(toNetHistory(log, labels).map((e) => e.message)).toEqual(['Book now', 'Say hi', 'Start']);
+	});
+
+	it('lists every change once it is past the live version', () => {
+		const log = [c('b0000000', 'x'), c('a0000000', 'x'), c('f0000000', 'x')];
+		expect(netUnpublished(log, labels, 'f0000000').map((e) => e.message)).toEqual(['Say hi', 'Meet Kristine']);
+	});
+
+	it('says so when the draft takes back something that is live', () => {
+		const log = [c('e2000000', 'rollback: restore f0000000'), c('a0000000', 'x'), c('f0000000', 'x')];
+		expect(netUnpublished(log, labels, 'a0000000').map((e) => e.message)).toEqual(['Takes back changes that are live now']);
 	});
 });
