@@ -40,6 +40,7 @@ import {
 	toNetHistory,
 	netUnpublished,
 	planLinkChanges,
+	CONTINUE_MARKER,
 	type SiteMeta,
 	type SourceFile,
 } from '../../think/nova-edits';
@@ -352,6 +353,16 @@ export class ThinkCodingBehavior
 			'3. End your turn after calling `ask_questions`. Do not write/edit files or deploy until the scope is clear or the user tells you to proceed with your assumptions.',
 			'If the request is already clear and specific, skip this and go straight to building.',
 			'',
+			'## Talking to the owner (you are Nova; they are a business owner, not a developer)',
+			'Every turn that changes the site starts with a short message to the owner BEFORE your first tool call, in plain words, specific to what they actually wrote (never generic):',
+			'- what you understood (name the things they asked for, in their words);',
+			'- the plan: which pages and sections you will change, the brand (name, colours, type) if it changes, and which of their photos or files go where (by file name);',
+			'- one line exactly in this form: `Plan: about N steps.` where N is your honest count of the tool calls you expect (each page or section you write is a step, plus deploys and checks);',
+			'- only a question that truly blocks you; otherwise make sensible choices and say which.',
+			'Then do ALL of it in this turn. A large request (a full redesign or rebrand of several pages) is still one job: work page by page, deploy after each page, and do not stop until every page, every link and every booking button is done and checked. Never leave it half-done and never ask the owner to send it again.',
+			'End the turn with a summary of what changed (pages, brand, which photos and files you used and where) and what the owner should look at, in plain words, no file paths or code.',
+			'Files the owner attached are named in their message with their library address (photos, videos, logos, fonts) and, for documents and spreadsheets, their text: use that content as facts (prices, services, wording); never invent prices, hours or links.',
+			'',
 			'## Deploy & verify workflow (VibeSDK-specific)',
 			'Once you are actively building (the scope is clear or the user confirmed), this app is previewed on Cloudflare Workers via SpaceDO — there is no shell. In a building turn, do NOT end after only writing files:',
 			'1. After writing or editing files, call `deploy_space` to commit and deploy so the preview rebuilds.',
@@ -495,6 +506,7 @@ export class ThinkCodingBehavior
 	}
 
 	/** Main loop: drain pendingUserInputs by driving the ThinkAgent. */
+	// (NOVA_CONTINUE_* below: how a turn that stopped halfway is picked up again.)
 	async build(): Promise<void> {
 		if (!this.isMVPGenerated() && this.state.query && this.state.pendingUserInputs.length === 0) {
 			this.setState({ ...this.state, pendingUserInputs: [this.state.query] });
@@ -510,7 +522,18 @@ export class ThinkCodingBehavior
 			await this.configureThinkAgent().catch((e) => this.logger.warn('ThinkAgent reconfigure failed', e));
 			const headBefore = await this.novaHead().catch(() => null);
 			try {
-				await this.runPrompt(this.novaWithOwnerNotes(compiled));
+				let turn = await this.runPrompt(this.novaWithOwnerNotes(compiled));
+				// A turn that stopped right after a tool result (the model's next step never came back,
+				// 2 Oct) is picked up again, at most NOVA_CONTINUE_TRIES times, never left half done.
+				for (let tries = 0; turn.endedMidway && tries < NOVA_CONTINUE_TRIES; tries++) {
+					this.logger.warn('Think turn stopped midway; continuing', { tries: tries + 1 });
+					turn = await this.runPrompt(NOVA_CONTINUE_PROMPT);
+				}
+				if (turn.endedMidway) {
+					this.novaSay(
+						"I couldn't finish that: I stopped partway through and couldn't pick it up again. What I'd done so far is saved in History; nothing else was changed. Send it again and I'll carry on.",
+					);
+				}
 				await this.callSpace((space) => space.gitCommit('chore: think turn changes')).catch(() => undefined);
 				const headAfter = await this.novaHead().catch(() => null);
 				if (headAfter && headAfter !== headBefore) {
@@ -539,8 +562,10 @@ export class ThinkCodingBehavior
 	 * Submit a prompt to the ThinkAgent and translate its streamed
 	 * `UIMessageChunk`s into VibeSDK WebSocket events.
 	 */
-	private async runPrompt(text: string): Promise<void> {
+	private async runPrompt(text: string): Promise<{ endedMidway: boolean }> {
 		const conversationId = IdGenerator.generateConversationId();
+		// Did the model stop right after a tool came back (no words after it)? Then the job is half done.
+		let afterTool = false;
 		this.broadcast(WebSocketMessageResponses.CONVERSATION_RESPONSE, {
 			message: '',
 			conversationId,
@@ -560,6 +585,9 @@ export class ThinkCodingBehavior
 				} catch {
 					return;
 				}
+				const type = (chunk as { type?: string }).type;
+				if (type === 'tool-output-available' || type === 'tool-output-error' || type === 'tool-input-available') afterTool = true;
+				else if (type === 'text-delta' && (chunk as { delta?: string }).delta?.trim()) afterTool = false;
 				return this.translateChunk(chunk, conversationId, accumulated, seenWrittenFiles, toolNames, toolInputs);
 			},
 			(err) => this.broadcast(WebSocketMessageResponses.ERROR, { error: err }),
@@ -587,6 +615,16 @@ export class ThinkCodingBehavior
 				});
 			}
 		}
+		return { endedMidway: afterTool };
+	}
+
+	/** Say something in the chat as Nova (a plain, final message). */
+	private novaSay(message: string): void {
+		this.broadcast(WebSocketMessageResponses.CONVERSATION_RESPONSE, {
+			message,
+			conversationId: IdGenerator.generateConversationId(),
+			isStreaming: false,
+		});
 	}
 
 	private async translateChunk(
@@ -1408,3 +1446,8 @@ function isFileDeleteTool(name: string): boolean {
 	const n = name.toLowerCase();
 	return n === 'delete' || n === 'rm' || n === 'remove';
 }
+
+/** How often a turn that stopped right after a tool result is picked up again before Nova says so. */
+const NOVA_CONTINUE_TRIES = 3;
+const NOVA_CONTINUE_PROMPT =
+	`${CONTINUE_MARKER}: a tool result came back and you did not continue. Carry on with the owner\'s request from exactly where you stopped. Do not redo steps that are already done; check the files if unsure. Finish the whole job, then give your summary.)`;

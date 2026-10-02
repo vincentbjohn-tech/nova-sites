@@ -187,7 +187,7 @@ export class NovaSitesController extends BaseController {
 	static async message(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
 		const stub = await NovaSitesController.ownedStub(env, context);
 		if (!stub) return NovaSitesController.notFound();
-		const text = NovaSitesController.str((await NovaSitesController.body(request)).text, 20_000)?.trim();
+		const text = NovaSitesController.str((await NovaSitesController.body(request)).text, 100_000)?.trim();
 		if (!text) return NovaSitesController.createErrorResponse('Say what to change', 400);
 		await stub.novaFollowUp(text);
 		return NovaSitesController.createSuccessResponse({ accepted: true });

@@ -314,8 +314,22 @@ export function readHeadMeta(html: string): { iconUrl: string | null; shareImage
 export const EARLIER_REQUEST_LABEL =
 	'[Earlier message from the owner, already handled in a previous turn. Context only: do not act on it, answer it or bring it up again unless the owner asks. If it was undone or left out, that was on purpose.]';
 
+/** Nova OS's own "carry on" nudge after a turn stopped halfway: not a request of the owner's. */
+export const CONTINUE_MARKER = '(Nova OS: your last turn stopped partway';
+
+function textOf(message: ModelMessage): string {
+	if (typeof message.content === 'string') return message.content;
+	return Array.isArray(message.content)
+		? message.content.map((p) => ((p as { type?: string }).type === 'text' ? (p as { text: string }).text : '')).join('')
+		: '';
+}
+
 export function markEarlierRequests(messages: ModelMessage[]): ModelMessage[] {
-	const lastUser = messages.map((message) => message.role).lastIndexOf('user');
+	// The owner's current request is the last user message that isn't a "carry on" nudge.
+	let lastUser = -1;
+	messages.forEach((m, i) => {
+		if (m.role === 'user' && !textOf(m).startsWith(CONTINUE_MARKER)) lastUser = i;
+	});
 	return messages.map((message, index) => {
 		if (message.role !== 'user' || index >= lastUser) return message;
 		if (typeof message.content === 'string') {

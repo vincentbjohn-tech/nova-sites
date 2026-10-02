@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { replaceVisibleText, setHeadMeta, readHeadMeta, readPageMeta, planMetaChanges, toHistory, isEditableSource, OWNER_COMMIT_PREFIX, markEarlierRequests, EARLIER_REQUEST_LABEL, netUnpublished, toNetHistory, planLinkChanges } from './nova-edits';
+import { replaceVisibleText, setHeadMeta, readHeadMeta, readPageMeta, planMetaChanges, toHistory, isEditableSource, OWNER_COMMIT_PREFIX, markEarlierRequests, EARLIER_REQUEST_LABEL, netUnpublished, toNetHistory, planLinkChanges, CONTINUE_MARKER } from './nova-edits';
 
 const html = `<!doctype html><html><head><title>Kristi Grace Hair</title></head><body>
   <h1>Hair that feels
@@ -259,5 +259,17 @@ describe('planLinkChanges with text', () => {
 		const plan = planLinkChanges(files, [{ from: g, to: `${g}-gloss`, text: 'Gloss / Toner (Add-On)' }]);
 		expect(plan.counts).toEqual([1]);
 		expect(plan.files[0].content).toBe(`<a href="${g}">Book now</a><a class="card" href="${g}-gloss"><h3>Gloss / Toner (Add-On)</h3><p>$45</p></a><a href="${g}">Extra Long &amp; Thick</a>`);
+	});
+});
+
+describe('markEarlierRequests with a carry-on nudge', () => {
+	it('keeps the owner\'s request current when Nova OS nudged a stalled turn', () => {
+		const out = markEarlierRequests([
+			{ role: 'user', content: 'Rebrand as WASHED' },
+			{ role: 'assistant', content: 'On it.' },
+			{ role: 'user', content: `${CONTINUE_MARKER}: carry on.` },
+		]);
+		expect(out[0].content).toBe('Rebrand as WASHED');
+		expect(out[2].content).toBe(`${CONTINUE_MARKER}: carry on.`);
 	});
 });
