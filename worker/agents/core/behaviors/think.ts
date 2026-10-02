@@ -37,7 +37,7 @@ import {
 	readPageMeta,
 	replaceVisibleText,
 	setHeadMeta,
-	toNetHistory,
+	toHistory,
 	netUnpublished,
 	planLinkChanges,
 	CONTINUE_MARKER,
@@ -363,6 +363,9 @@ export class ThinkCodingBehavior
 			'End the turn with a summary of what changed (pages, brand, which photos and files you used and where) and what the owner should look at, in plain words, no file paths or code.',
 			'Files the owner attached are named in their message with their library address (photos, videos, logos, fonts) and, for documents and spreadsheets, their text: use that content as facts (prices, services, wording); never invent prices, hours or links.',
 			'',
+			'## Preview is not live',
+			'`deploy_space` updates the PREVIEW only. Never tell the owner the site is "published", "live" or "updated on your site" because of it; say "it\'s in the preview" or "ready in the preview". Only the owner\'s Publish button puts it live, and only say "live" if they published.',
+			'',
 			'## Website or funnel',
 			'Decide which one the owner wants before you plan, and say which in your plan:',
 			'- A WEBSITE is several pages to explore the business: home, services (with prices), about, gallery, contact, booking. Clear navigation between them; every service and every Book button leads to booking.',
@@ -553,7 +556,7 @@ export class ThinkCodingBehavior
 		await this.callSpace((space) => space.gitCommit('chore: think turn changes')).catch(() => undefined);
 		const headAfter = await this.novaHead().catch(() => null);
 		if (headAfter && headAfter !== headBefore) {
-			this.novaLabel(headAfter, active.request);
+			this.novaLabel(headAfter, this.novaOwnerWords(active.request));
 			this.novaKeepReply(headAfter, turn.reply);
 			this.novaPrewarm();
 		}
@@ -607,7 +610,7 @@ export class ThinkCodingBehavior
 				await this.callSpace((space) => space.gitCommit('chore: think turn changes')).catch(() => undefined);
 				const headAfter = await this.novaHead().catch(() => null);
 				if (headAfter && headAfter !== headBefore) {
-					this.novaLabel(headAfter, compiled);
+					this.novaLabel(headAfter, this.novaOwnerWords(compiled));
 					this.novaKeepReply(headAfter, turn.reply);
 					this.novaPrewarm();
 				}
@@ -645,7 +648,7 @@ export class ThinkCodingBehavior
 			isStreaming: true,
 		});
 
-		const accumulated = { text: '' };
+		const accumulated = { text: '', afterTool: false };
 		const seenWrittenFiles = new Set<string>();
 		const toolNames = new Map<string, string>();
 		const toolInputs = new Map<string, Record<string, unknown>>();
@@ -661,7 +664,10 @@ export class ThinkCodingBehavior
 				const type = (chunk as { type?: string }).type;
 				const active = this.state.novaActiveTurn;
 				if (active && Date.now() - active.lastProgressAt > 15_000) this.novaSetActive({ ...active, lastProgressAt: Date.now() });
-				if (type === 'tool-output-available' || type === 'tool-output-error' || type === 'tool-input-available') afterTool = true;
+				if (type === 'tool-output-available' || type === 'tool-output-error' || type === 'tool-input-available') {
+					afterTool = true;
+					accumulated.afterTool = true;
+				}
 				else if (type === 'text-delta' && (chunk as { delta?: string }).delta?.trim()) afterTool = false;
 				return this.translateChunk(chunk, conversationId, accumulated, seenWrittenFiles, toolNames, toolInputs);
 			},
@@ -718,7 +724,7 @@ export class ThinkCodingBehavior
 	private async translateChunk(
 		chunk: ThinkChunk,
 		conversationId: string,
-		accumulated: { text: string },
+		accumulated: { text: string; afterTool: boolean },
 		seenWrittenFiles: Set<string>,
 		toolNames: Map<string, string>,
 		toolInputs: Map<string, Record<string, unknown>>,
@@ -727,6 +733,9 @@ export class ThinkCodingBehavior
 			case 'text-delta': {
 				const delta = (chunk as { delta?: string }).delta;
 				if (typeof delta === 'string' && delta.length > 0) {
+					// A new step's words start a new paragraph ("…3 steps.I found" ran together).
+					if (accumulated.afterTool && accumulated.text && !/\s$/.test(accumulated.text)) accumulated.text += '\n\n';
+					accumulated.afterTool = false;
 					accumulated.text += delta;
 					this.broadcast(WebSocketMessageResponses.CONVERSATION_RESPONSE, {
 						message: delta,
@@ -1348,7 +1357,29 @@ export class ThinkCodingBehavior
 	async novaHistory() {
 		const log = await this.callSpace((space) => space.gitLog(200));
 		const replies = this.state.novaReplies ?? {};
-		return toNetHistory(log, this.state.novaLabels ?? {}).map((e) => (replies[e.hash] ? { ...e, reply: replies[e.hash] } : e));
+		// Every version, restores included ("Went back to …"), so going back never loses what came after
+		// (2 Oct bug hunt: the net chain here hid every newer version after a restore). Only Publish's
+		// list is net.
+		const hidden = new Set(this.state.novaHiddenHistory ?? []);
+		return toHistory(log, this.state.novaLabels ?? {})
+			.filter((e) => !hidden.has(e.hash))
+			.map((e) => (replies[e.hash] ? { ...e, reply: replies[e.hash] } : e));
+	}
+
+	/** The words to show for a request: what the owner wrote, not the brief Nova OS composed around it. */
+	private novaOwnerWords(request: string): string {
+		const first = this.state.novaFirstLabel;
+		return first && request === this.state.query ? first : request;
+	}
+
+	novaSetFirstLabel(label: string): void {
+		this.setState({ ...this.state, novaFirstLabel: label.slice(0, 2000) });
+	}
+
+	novaHideHistory(hashes: string[]): { hidden: number } {
+		const all = new Set([...(this.state.novaHiddenHistory ?? []), ...hashes]);
+		this.setState({ ...this.state, novaHiddenHistory: [...all].slice(-500) });
+		return { hidden: all.size };
 	}
 
 	/** Keep Nova's final words for a finished change (the last 50, 6,000 characters each). */

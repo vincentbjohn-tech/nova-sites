@@ -70,8 +70,11 @@ export class NovaSitesController extends BaseController {
 
 	/** POST /api/nova/sites {prompt} → {id}; the agent starts building right away. */
 	static async create(request: Request, env: Env, ctx: ExecutionContext, context: RouteContext): Promise<Response> {
-		const prompt = NovaSitesController.str((await NovaSitesController.body(request)).prompt, 100_000)?.trim();
+		const createBody = await NovaSitesController.body(request);
+		const prompt = NovaSitesController.str(createBody.prompt, 100_000)?.trim();
 		if (!prompt) return NovaSitesController.createErrorResponse('Describe the site you want', 400);
+		// What the owner wrote, when Nova OS sent a composed brief (a style): History and Publish show this.
+		const label = NovaSitesController.str(createBody.label, 2000)?.trim();
 		const forwarded = new Request(new URL('/api/agent', request.url), {
 			method: 'POST',
 			headers: request.headers,
@@ -102,8 +105,19 @@ export class NovaSitesController extends BaseController {
 		}
 		if (!agentId || failure) return NovaSitesController.createErrorResponse(failure ?? 'Could not start the site', 500);
 		const stub = await getAgentStub(env, agentId);
+		if (label) await stub.novaSetFirstLabel(label);
 		await stub.novaStartBuild();
 		return NovaSitesController.createSuccessResponse({ id: agentId });
+	}
+
+	/** POST /api/nova/sites/:id/history/hide {hashes}: leave old test edits out of History (they stay in git). */
+	static async hideHistory(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
+		const stub = await NovaSitesController.ownedStub(env, context);
+		if (!stub) return NovaSitesController.notFound();
+		const body = await NovaSitesController.body(request);
+		const hashes = Array.isArray(body.hashes) ? body.hashes.filter((h: unknown): h is string => typeof h === 'string' && /^[0-9a-f]{40}$/.test(h)) : [];
+		if (hashes.length === 0 || hashes.length > 200) return NovaSitesController.createErrorResponse('hashes: 1–200 full commit hashes', 400);
+		return NovaSitesController.createSuccessResponse(await stub.novaHideHistory(hashes));
 	}
 
 	/**
