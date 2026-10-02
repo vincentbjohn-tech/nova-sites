@@ -529,12 +529,12 @@ export class ThinkCodingBehavior
 			await this.configureThinkAgent().catch((e) => this.logger.warn('ThinkAgent reconfigure failed', e));
 			const headBefore = await this.novaHead().catch(() => null);
 			try {
-				let turn = await this.runPrompt(this.novaWithOwnerNotes(compiled));
+				let turn = await this.runPromptSafely(this.novaWithOwnerNotes(compiled));
 				// A turn that stopped right after a tool result (the model's next step never came back,
 				// 2 Oct) is picked up again, at most NOVA_CONTINUE_TRIES times, never left half done.
 				for (let tries = 0; turn.endedMidway && tries < NOVA_CONTINUE_TRIES; tries++) {
 					this.logger.warn('Think turn stopped midway; continuing', { tries: tries + 1 });
-					turn = await this.runPrompt(NOVA_CONTINUE_PROMPT);
+					turn = await this.runPromptSafely(NOVA_CONTINUE_PROMPT);
 				}
 				if (turn.endedMidway) {
 					this.novaSay(
@@ -623,6 +623,19 @@ export class ThinkCodingBehavior
 			}
 		}
 		return { endedMidway: afterTool };
+	}
+
+	/**
+	 * A turn that throws partway (the model's stream broke, a tool call came back malformed) is a turn
+	 * that stopped midway, not the end of the owner's request: the build loop picks it up again.
+	 */
+	private async runPromptSafely(text: string): Promise<{ endedMidway: boolean }> {
+		try {
+			return await this.runPrompt(text);
+		} catch (e) {
+			this.logger.warn('Think turn threw; treating it as stopped midway', e);
+			return { endedMidway: true };
+		}
 	}
 
 	/** Say something in the chat as Nova (a plain, final message). */
