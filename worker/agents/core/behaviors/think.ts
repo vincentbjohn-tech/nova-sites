@@ -1173,7 +1173,7 @@ export class ThinkCodingBehavior
 	}
 
 	/** Repoint links (exact hrefs) across the site as one owner change, e.g. booking buttons to Nova's booking page. */
-	async novaLinkEdit(changes: { from: string; to: string }[], label: string) {
+	async novaLinkEdit(changes: { from: string; to: string; text?: string }[], label: string) {
 		const plan = planLinkChanges(await this.novaSourceFiles(), changes);
 		if (plan.files.length === 0) return { error: 'not_found' as const, counts: plan.counts };
 		const done = await this.novaCommitChange(plan.files, label, 'you');

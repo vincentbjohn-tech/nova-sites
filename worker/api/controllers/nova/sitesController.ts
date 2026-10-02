@@ -194,15 +194,15 @@ export class NovaSitesController extends BaseController {
 	}
 
 	/** POST /api/nova/sites/:id/text {find, replace, path?} — click-and-type, no AI. */
-	/** POST /api/nova/sites/:id/links {changes: [{from, to}], label}: repoint exact hrefs as one owner change. */
+	/** POST /api/nova/sites/:id/links {changes: [{from, to, text?}], label}: repoint exact hrefs (only links whose words contain `text`, when given) as one owner change. */
 	static async links(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
 		const stub = await NovaSitesController.ownedStub(env, context);
 		if (!stub) return NovaSitesController.notFound();
 		const body = await NovaSitesController.body(request);
 		const raw = Array.isArray(body.changes) ? body.changes : [];
 		const changes = raw
-			.map((c: { from?: unknown; to?: unknown }) => ({ from: NovaSitesController.str(c?.from, 2000), to: NovaSitesController.str(c?.to, 2000) }))
-			.filter((c): c is { from: string; to: string } => !!c.from && !!c.to && !/["'<>\s]/.test(c.to));
+			.map((c: { from?: unknown; to?: unknown; text?: unknown }) => ({ from: NovaSitesController.str(c?.from, 2000), to: NovaSitesController.str(c?.to, 2000), text: NovaSitesController.str(c?.text, 200) }))
+			.filter((c): c is { from: string; to: string; text: string | undefined } => !!c.from && !!c.to && !/["'<>\s]/.test(c.to));
 		const label = NovaSitesController.str(body.label, 200) ?? 'Changed where links go';
 		if (changes.length === 0 || changes.length !== raw.length || changes.length > 100) return NovaSitesController.createErrorResponse('changes: 1–100 of {from, to}', 400);
 		try {
