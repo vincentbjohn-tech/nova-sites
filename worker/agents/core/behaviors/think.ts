@@ -363,6 +363,13 @@ export class ThinkCodingBehavior
 			'End the turn with a summary of what changed (pages, brand, which photos and files you used and where) and what the owner should look at, in plain words, no file paths or code.',
 			'Files the owner attached are named in their message with their library address (photos, videos, logos, fonts) and, for documents and spreadsheets, their text: use that content as facts (prices, services, wording); never invent prices, hours or links.',
 			'',
+			'## Website or funnel',
+			'Decide which one the owner wants before you plan, and say which in your plan:',
+			'- A WEBSITE is several pages to explore the business: home, services (with prices), about, gallery, contact, booking. Clear navigation between them; every service and every Book button leads to booking.',
+			'- A FUNNEL is one goal, one path, one call to action, step by step: a landing page, then the opt-in / booking / checkout step, then a thank-you page. No navigation menu and no links that lead away from the path; every button on it is the same next step. Funnel kinds: lead magnet, VSL or book-a-call, webinar, waitlist, sales or launch.',
+			'If the request says which (or Nova OS says "Kind: website/funnel"), follow it. If not, infer it from their words ("get more calls booked for my coaching" → funnel; "a site for my salon" → website) and say "I\'m building a website" or "I\'m building a funnel" with one reason.',
+			'If the request carries a style (a master prompt with tokens, type and components), follow it exactly: its colours, fonts, components, MUST and NEVER rules; the owner chose that look.',
+			'',
 			'## Deploy & verify workflow (VibeSDK-specific)',
 			'Once you are actively building (the scope is clear or the user confirmed), this app is previewed on Cloudflare Workers via SpaceDO — there is no shell. In a building turn, do NOT end after only writing files:',
 			'1. After writing or editing files, call `deploy_space` to commit and deploy so the preview rebuilds.',
@@ -522,12 +529,12 @@ export class ThinkCodingBehavior
 			await this.configureThinkAgent().catch((e) => this.logger.warn('ThinkAgent reconfigure failed', e));
 			const headBefore = await this.novaHead().catch(() => null);
 			try {
-				let turn = await this.runPrompt(this.novaWithOwnerNotes(compiled));
+				let turn = await this.runPromptSafely(this.novaWithOwnerNotes(compiled));
 				// A turn that stopped right after a tool result (the model's next step never came back,
 				// 2 Oct) is picked up again, at most NOVA_CONTINUE_TRIES times, never left half done.
 				for (let tries = 0; turn.endedMidway && tries < NOVA_CONTINUE_TRIES; tries++) {
 					this.logger.warn('Think turn stopped midway; continuing', { tries: tries + 1 });
-					turn = await this.runPrompt(NOVA_CONTINUE_PROMPT);
+					turn = await this.runPromptSafely(NOVA_CONTINUE_PROMPT);
 				}
 				if (turn.endedMidway) {
 					this.novaSay(
@@ -616,6 +623,19 @@ export class ThinkCodingBehavior
 			}
 		}
 		return { endedMidway: afterTool };
+	}
+
+	/**
+	 * A turn that throws partway (the model's stream broke, a tool call came back malformed) is a turn
+	 * that stopped midway, not the end of the owner's request: the build loop picks it up again.
+	 */
+	private async runPromptSafely(text: string): Promise<{ endedMidway: boolean }> {
+		try {
+			return await this.runPrompt(text);
+		} catch (e) {
+			this.logger.warn('Think turn threw; treating it as stopped midway', e);
+			return { endedMidway: true };
+		}
 	}
 
 	/** Say something in the chat as Nova (a plain, final message). */
