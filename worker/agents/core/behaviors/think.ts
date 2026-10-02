@@ -554,6 +554,7 @@ export class ThinkCodingBehavior
 		const headAfter = await this.novaHead().catch(() => null);
 		if (headAfter && headAfter !== headBefore) {
 			this.novaLabel(headAfter, active.request);
+			this.novaKeepReply(headAfter, turn.reply);
 			this.novaPrewarm();
 		}
 		this.novaSetActive(undefined);
@@ -607,6 +608,7 @@ export class ThinkCodingBehavior
 				const headAfter = await this.novaHead().catch(() => null);
 				if (headAfter && headAfter !== headBefore) {
 					this.novaLabel(headAfter, compiled);
+					this.novaKeepReply(headAfter, turn.reply);
 					this.novaPrewarm();
 				}
 			} catch (e) {
@@ -633,7 +635,7 @@ export class ThinkCodingBehavior
 	 * Submit a prompt to the ThinkAgent and translate its streamed
 	 * `UIMessageChunk`s into VibeSDK WebSocket events.
 	 */
-	private async runPrompt(text: string): Promise<{ endedMidway: boolean }> {
+	private async runPrompt(text: string): Promise<{ endedMidway: boolean; reply?: string }> {
 		const conversationId = IdGenerator.generateConversationId();
 		// Did the model stop right after a tool came back (no words after it)? Then the job is half done.
 		let afterTool = false;
@@ -688,14 +690,14 @@ export class ThinkCodingBehavior
 				});
 			}
 		}
-		return { endedMidway: afterTool };
+		return { endedMidway: afterTool, reply: accumulated.text || undefined };
 	}
 
 	/**
 	 * A turn that throws partway (the model's stream broke, a tool call came back malformed) is a turn
 	 * that stopped midway, not the end of the owner's request: the build loop picks it up again.
 	 */
-	private async runPromptSafely(text: string): Promise<{ endedMidway: boolean }> {
+	private async runPromptSafely(text: string): Promise<{ endedMidway: boolean; reply?: string }> {
 		try {
 			return await this.runPrompt(text);
 		} catch (e) {
@@ -1345,7 +1347,17 @@ export class ThinkCodingBehavior
 
 	async novaHistory() {
 		const log = await this.callSpace((space) => space.gitLog(200));
-		return toNetHistory(log, this.state.novaLabels ?? {});
+		const replies = this.state.novaReplies ?? {};
+		return toNetHistory(log, this.state.novaLabels ?? {}).map((e) => (replies[e.hash] ? { ...e, reply: replies[e.hash] } : e));
+	}
+
+	/** Keep Nova's final words for a finished change (the last 50, 6,000 characters each). */
+	private novaKeepReply(hash: string, reply: string | undefined): void {
+		if (!reply?.trim()) return;
+		const all = { ...(this.state.novaReplies ?? {}), [hash]: reply.trim().slice(0, 6000) };
+		const keys = Object.keys(all);
+		for (const k of keys.slice(0, Math.max(0, keys.length - 50))) delete all[k];
+		this.setState({ ...this.state, novaReplies: all });
 	}
 
 	/** Remember something the owner did by hand, so Nova's next turn knows (her conversation doesn't). */
