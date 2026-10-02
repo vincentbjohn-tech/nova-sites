@@ -21,6 +21,7 @@ import { createDeploySpaceTool } from './deploy-tool';
 import { createCommitTool } from './commit-tool';
 import { createSetTitleTool } from './set-title-tool';
 import { selectThinkContextMessages } from './context-selector';
+import { markEarlierRequests } from './nova-edits';
 import { getUserConfigurableSettings } from '../../config';
 import { RateLimitService } from '../../services/rate-limit/rateLimits';
 import { hasCloudflareConfigured } from '../../services/rate-limit/usageChecker';
@@ -290,7 +291,7 @@ export class ThinkAgent extends Think<Env> {
 	}
 
 	override async beforeTurn(ctx: TurnContext): Promise<TurnConfig> {
-		const messages = selectThinkContextMessages(ctx.messages);
+		const messages = markEarlierRequests(selectThinkContextMessages(ctx.messages));
 		const config = this.getConfig<ThinkAgentConfig>();
 		this.turnUsage = null;
 		if (config) {

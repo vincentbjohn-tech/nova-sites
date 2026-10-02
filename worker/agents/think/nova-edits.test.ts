@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { replaceVisibleText, setHeadMeta, readHeadMeta, readPageMeta, planMetaChanges, toHistory, isEditableSource, OWNER_COMMIT_PREFIX } from './nova-edits';
+import { replaceVisibleText, setHeadMeta, readHeadMeta, readPageMeta, planMetaChanges, toHistory, isEditableSource, OWNER_COMMIT_PREFIX, markEarlierRequests, EARLIER_REQUEST_LABEL } from './nova-edits';
 
 const html = `<!doctype html><html><head><title>Kristi Grace Hair</title></head><body>
   <h1>Hair that feels
@@ -183,5 +183,24 @@ describe('Google & sharing: every page, in one change', () => {
 		});
 		expect(readPageMeta(setHeadMeta(html, { canonical: '' })).canonical).toBeNull();
 		expect(setHeadMeta(html, { canonical: '' })).not.toContain('og:url');
+	});
+});
+
+describe('markEarlierRequests', () => {
+	it('labels every owner message except the newest one', () => {
+		const out = markEarlierRequests([
+			{ role: 'user', content: 'Add a New clients line' },
+			{ role: 'assistant', content: 'Added it.' },
+			{ role: 'user', content: [{ type: 'text', text: 'Change the About heading' }] },
+			{ role: 'assistant', content: 'Changed it.' },
+			{ role: 'user', content: 'Make the button say Book now' },
+		]);
+		expect(out[0].content).toBe(`${EARLIER_REQUEST_LABEL}\nAdd a New clients line`);
+		expect(out[2].content).toEqual([
+			{ type: 'text', text: EARLIER_REQUEST_LABEL },
+			{ type: 'text', text: 'Change the About heading' },
+		]);
+		expect(out[4].content).toBe('Make the button say Book now');
+		expect(out[1].content).toBe('Added it.');
 	});
 });
