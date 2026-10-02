@@ -441,6 +441,24 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
     novaUnpublish() { return this.novaBehavior().novaUnpublish(); }
     novaSetAddress(name: string) { return this.novaBehavior().novaSetAddress(name); }
 
+    /** Nova Sites: the one-minute check while a request is worked on; persisted, so it fires after a restart too. */
+    async novaWatch(on: boolean): Promise<void> {
+        if (on) {
+            await this.scheduleEvery(60, 'novaWatchdog');
+            return;
+        }
+        for (const s of this.getSchedules()) {
+            if (s.callback === 'novaWatchdog') await this.cancelSchedule(s.id);
+        }
+    }
+
+    /** Called by the schedule: picks a request back up when its work stopped (a restart, an eviction). */
+    async novaWatchdog(): Promise<void> {
+        const behavior = this.behavior as unknown as { novaWatchdog?: () => Promise<void> };
+        if (typeof behavior.novaWatchdog === 'function') await behavior.novaWatchdog();
+        else await this.novaWatch(false);
+    }
+
     /** Start the first build (what the SDK's `generate_all` does over the WebSocket). */
     novaStartBuild(): void {
         this.setState({ ...this.state, shouldBeGenerating: true });

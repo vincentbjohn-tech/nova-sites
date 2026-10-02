@@ -30,6 +30,8 @@ export interface AgentInfrastructure<TState extends BaseProjectState> {
     getConversationState(): ConversationState;
     addConversationMessage(message: ConversationMessage): void;
     clearConversation(): void;
+    /** Nova Sites: a persisted one-minute check while a request is being worked on (survives restarts). */
+    novaWatch(on: boolean): Promise<void>;
     
     // Services
     readonly fileManager: FileManager;
