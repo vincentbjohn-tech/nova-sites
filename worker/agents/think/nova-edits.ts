@@ -378,3 +378,32 @@ export function netUnpublished(
 	if (shown.length > 0) return shown;
 	return [{ hash: head.oid, message: added.length > 0 ? 'Changes by Nova' : 'Takes back changes that are live now' }];
 }
+
+/**
+ * Point links somewhere else (the owner's "these buttons go to my booking page"): every
+ * href that is exactly `from` becomes `to`, in the site's pages. Exact matches only, so nothing
+ * else moves; scripts are left alone (a selector like a[href="#book"] there is not a link).
+ */
+export function planLinkChanges(
+	files: SourceFile[],
+	changes: { from: string; to: string }[],
+): { files: SourceFile[]; counts: number[] } {
+	const counts = changes.map(() => 0);
+	const out: SourceFile[] = [];
+	for (const file of files) {
+		if (!/\.html?$/i.test(file.path)) continue;
+		let content = file.content;
+		changes.forEach(({ from, to }, i) => {
+			for (const q of ['"', "'"]) {
+				const needle = `href=${q}${from}${q}`;
+				const parts = content.split(needle);
+				if (parts.length > 1) {
+					counts[i] += parts.length - 1;
+					content = parts.join(`href=${q}${to}${q}`);
+				}
+			}
+		});
+		if (content !== file.content) out.push({ path: file.path, content });
+	}
+	return { files: out, counts };
+}

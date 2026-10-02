@@ -39,6 +39,7 @@ import {
 	setHeadMeta,
 	toNetHistory,
 	netUnpublished,
+	planLinkChanges,
 	type SiteMeta,
 	type SourceFile,
 } from '../../think/nova-edits';
@@ -1169,6 +1170,15 @@ export class ThinkCodingBehavior
 		const done = await this.novaCommitOwnerChange(result.path, result.content, `Changed “${shortFind}” to “${shortReplace}”`);
 		this.novaNoteForAgent(`They changed the text “${shortFind}” to “${shortReplace}” in ${result.path}.`);
 		return { path: result.path, ...done, ms: Date.now() - started };
+	}
+
+	/** Repoint links (exact hrefs) across the site as one owner change, e.g. booking buttons to Nova's booking page. */
+	async novaLinkEdit(changes: { from: string; to: string }[], label: string) {
+		const plan = planLinkChanges(await this.novaSourceFiles(), changes);
+		if (plan.files.length === 0) return { error: 'not_found' as const, counts: plan.counts };
+		const done = await this.novaCommitChange(plan.files, label, 'you');
+		this.novaNoteForAgent(`They changed where links go: ${label}. Keep those links as they are.`);
+		return { ...done, counts: plan.counts, files: plan.files.map((f) => f.path) };
 	}
 
 	async novaSetMeta(meta: SiteMeta, path = 'public/index.html') {
