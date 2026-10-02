@@ -37,7 +37,9 @@ import {
 	readPageMeta,
 	replaceVisibleText,
 	setHeadMeta,
-	toHistory,
+	toNetHistory,
+	netUnpublished,
+	planLinkChanges,
 	type SiteMeta,
 	type SourceFile,
 } from '../../think/nova-edits';
@@ -1170,6 +1172,15 @@ export class ThinkCodingBehavior
 		return { path: result.path, ...done, ms: Date.now() - started };
 	}
 
+	/** Repoint links (exact hrefs) across the site as one owner change, e.g. booking buttons to Nova's booking page. */
+	async novaLinkEdit(changes: { from: string; to: string }[], label: string) {
+		const plan = planLinkChanges(await this.novaSourceFiles(), changes);
+		if (plan.files.length === 0) return { error: 'not_found' as const, counts: plan.counts };
+		const done = await this.novaCommitChange(plan.files, label, 'you');
+		this.novaNoteForAgent(`They changed where links go: ${label}. Keep those links as they are.`);
+		return { ...done, counts: plan.counts, files: plan.files.map((f) => f.path) };
+	}
+
 	async novaSetMeta(meta: SiteMeta, path = 'public/index.html') {
 		const html = await this.callSpace((space) => space.readFile(path.replace(/^\/+/, '')));
 		return this.novaCommitOwnerChange(path.replace(/^\/+/, ''), setHeadMeta(html, meta), 'Updated how the site shows on Google and when shared');
@@ -1210,7 +1221,7 @@ export class ThinkCodingBehavior
 
 	async novaHistory() {
 		const log = await this.callSpace((space) => space.gitLog(200));
-		return toHistory(log, this.state.novaLabels ?? {});
+		return toNetHistory(log, this.state.novaLabels ?? {});
 	}
 
 	/** Remember something the owner did by hand, so Nova's next turn knows (her conversation doesn't). */
@@ -1254,12 +1265,10 @@ export class ThinkCodingBehavior
 		return { hash: head, previewUrl: await this.getBrowserPreviewURL() };
 	}
 
-	/** Commits after the live one, oldest first: what Publish would put live. */
+	/** What Publish would change, oldest first: the net difference from the live version. */
 	async novaUnpublished() {
-		const history = await this.novaHistory();
-		const live = this.state.novaPublishedHash;
-		const index = live ? history.findIndex((e) => e.hash === live) : history.length;
-		return (index === -1 ? history : history.slice(0, index)).reverse().map(({ hash, message }) => ({ hash, message }));
+		const log = await this.callSpace((space) => space.gitLog(200));
+		return netUnpublished(log, this.state.novaLabels ?? {}, this.state.novaPublishedHash);
 	}
 
 	async novaPublish() {

@@ -194,6 +194,28 @@ export class NovaSitesController extends BaseController {
 	}
 
 	/** POST /api/nova/sites/:id/text {find, replace, path?} — click-and-type, no AI. */
+	/** POST /api/nova/sites/:id/links {changes: [{from, to}], label}: repoint exact hrefs as one owner change. */
+	static async links(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
+		const stub = await NovaSitesController.ownedStub(env, context);
+		if (!stub) return NovaSitesController.notFound();
+		const body = await NovaSitesController.body(request);
+		const raw = Array.isArray(body.changes) ? body.changes : [];
+		const changes = raw
+			.map((c: { from?: unknown; to?: unknown }) => ({ from: NovaSitesController.str(c?.from, 2000), to: NovaSitesController.str(c?.to, 2000) }))
+			.filter((c): c is { from: string; to: string } => !!c.from && !!c.to && !/["'<>\s]/.test(c.to));
+		const label = NovaSitesController.str(body.label, 200) ?? 'Changed where links go';
+		if (changes.length === 0 || changes.length !== raw.length || changes.length > 100) return NovaSitesController.createErrorResponse('changes: 1–100 of {from, to}', 400);
+		try {
+			const result = await stub.novaLinkEdit(changes, label);
+			if ('error' in result) {
+				return new Response(JSON.stringify({ success: false, error: result.error }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+			}
+			return NovaSitesController.createSuccessResponse(result);
+		} catch (error) {
+			return NovaSitesController.busyOr(error);
+		}
+	}
+
 	static async text(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
 		const stub = await NovaSitesController.ownedStub(env, context);
 		if (!stub) return NovaSitesController.notFound();

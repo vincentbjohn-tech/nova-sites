@@ -324,3 +324,86 @@ export function markEarlierRequests(messages: ModelMessage[]): ModelMessage[] {
 		return { ...message, content: [{ type: 'text' as const, text: EARLIER_REQUEST_LABEL }, ...message.content] };
 	});
 }
+
+type LogCommit = { oid: string; message: string; author?: { timestamp?: number } };
+
+const RESTORE_MESSAGE = /^rollback: restore ([0-9a-f]{7,40})/;
+
+/**
+ * The commits that still shape the site, oldest first, as of each commit. Going
+ * back to a version makes the site exactly what it was then, so everything after
+ * that version (and the restore itself) drops out. `log` is newest first, as git
+ * gives it. A restore to a version older than the log stays, as one entry.
+ */
+export function netChains(log: LogCommit[]): Map<string, LogCommit[]> {
+	const chains = new Map<string, LogCommit[]>();
+	let chain: LogCommit[] = [];
+	for (const commit of [...log].reverse()) {
+		const target = RESTORE_MESSAGE.exec(commit.message.trim())?.[1];
+		const at = target ? [...chains.entries()].find(([oid]) => oid.startsWith(target))?.[1] : undefined;
+		chain = at ? [...at] : [...chain, commit];
+		chains.set(commit.oid, chain);
+	}
+	return chains;
+}
+
+/** History the owner sees: the net chain to HEAD, newest first (undone changes and restores drop out). */
+export function toNetHistory(log: LogCommit[], labels: Record<string, string>): HistoryEntry[] {
+	const head = log[0];
+	if (!head) return [];
+	return toHistory([...(netChains(log).get(head.oid) ?? [])].reverse(), labels);
+}
+
+/**
+ * What Publish would change, oldest first: the difference between the version that is
+ * live and HEAD, not every turn since. Undone changes cancel out; nothing is listed when
+ * the draft is the live version.
+ */
+export function netUnpublished(
+	log: LogCommit[],
+	labels: Record<string, string>,
+	publishedHash: string | undefined,
+): { hash: string; message: string }[] {
+	const head = log[0];
+	if (!head) return [];
+	const chains = netChains(log);
+	const now = chains.get(head.oid) ?? [];
+	const live = publishedHash ? chains.get(publishedHash) : [];
+	if (!live) return toHistory([...now].reverse(), labels).reverse().map(({ hash, message }) => ({ hash, message }));
+	let same = 0;
+	while (same < now.length && same < live.length && now[same].oid === live[same].oid) same++;
+	const added = now.slice(same);
+	if (added.length === 0 && same === live.length) return [];
+	const shown = toHistory([...added].reverse(), labels).reverse().map(({ hash, message }) => ({ hash, message }));
+	if (shown.length > 0) return shown;
+	return [{ hash: head.oid, message: added.length > 0 ? 'Changes by Nova' : 'Takes back changes that are live now' }];
+}
+
+/**
+ * Point links somewhere else (the owner's "these buttons go to my booking page"): every
+ * href that is exactly `from` becomes `to`, in the site's pages. Exact matches only, so nothing
+ * else moves; scripts are left alone (a selector like a[href="#book"] there is not a link).
+ */
+export function planLinkChanges(
+	files: SourceFile[],
+	changes: { from: string; to: string }[],
+): { files: SourceFile[]; counts: number[] } {
+	const counts = changes.map(() => 0);
+	const out: SourceFile[] = [];
+	for (const file of files) {
+		if (!/\.html?$/i.test(file.path)) continue;
+		let content = file.content;
+		changes.forEach(({ from, to }, i) => {
+			for (const q of ['"', "'"]) {
+				const needle = `href=${q}${from}${q}`;
+				const parts = content.split(needle);
+				if (parts.length > 1) {
+					counts[i] += parts.length - 1;
+					content = parts.join(`href=${q}${to}${q}`);
+				}
+			}
+		});
+		if (content !== file.content) out.push({ path: file.path, content });
+	}
+	return { files: out, counts };
+}
