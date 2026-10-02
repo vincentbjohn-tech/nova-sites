@@ -386,21 +386,31 @@ export function netUnpublished(
  */
 export function planLinkChanges(
 	files: SourceFile[],
-	changes: { from: string; to: string }[],
+	changes: { from: string; to: string; text?: string }[],
 ): { files: SourceFile[]; counts: number[] } {
 	const counts = changes.map(() => 0);
 	const out: SourceFile[] = [];
+	const words = (html: string) =>
+		html.replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 	for (const file of files) {
 		if (!/\.html?$/i.test(file.path)) continue;
 		let content = file.content;
-		changes.forEach(({ from, to }, i) => {
+		changes.forEach(({ from, to, text }, i) => {
 			for (const q of ['"', "'"]) {
 				const needle = `href=${q}${from}${q}`;
-				const parts = content.split(needle);
-				if (parts.length > 1) {
+				if (!content.includes(needle)) continue;
+				if (text === undefined) {
+					const parts = content.split(needle);
 					counts[i] += parts.length - 1;
 					content = parts.join(`href=${q}${to}${q}`);
+					continue;
 				}
+				// Only the links whose own words contain `text` (a card among others with the same href).
+				content = content.replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, (anchor) => {
+					if (!anchor.includes(needle) || !words(anchor).includes(text)) return anchor;
+					counts[i] += 1;
+					return anchor.split(needle).join(`href=${q}${to}${q}`);
+				});
 			}
 		});
 		if (content !== file.content) out.push({ path: file.path, content });

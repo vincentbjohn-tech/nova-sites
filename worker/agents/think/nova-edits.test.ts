@@ -251,3 +251,13 @@ describe('planLinkChanges', () => {
 		);
 	});
 });
+
+describe('planLinkChanges with text', () => {
+	it('repoints only the link whose own words contain the text', () => {
+		const g = 'https://os.usenovaos.com/book/k';
+		const files = [{ path: 'public/index.html', content: `<a href="${g}">Book now</a><a class="card" href="${g}"><h3>Gloss / Toner (Add-On)</h3><p>$45</p></a><a href="${g}">Extra Long &amp; Thick</a>` }];
+		const plan = planLinkChanges(files, [{ from: g, to: `${g}-gloss`, text: 'Gloss / Toner (Add-On)' }]);
+		expect(plan.counts).toEqual([1]);
+		expect(plan.files[0].content).toBe(`<a href="${g}">Book now</a><a class="card" href="${g}-gloss"><h3>Gloss / Toner (Add-On)</h3><p>$45</p></a><a href="${g}">Extra Long &amp; Thick</a>`);
+	});
+});
