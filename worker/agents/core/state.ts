@@ -142,6 +142,8 @@ export interface ThinkState extends BaseProjectState {
     novaPublishedHash?: string;
     /** Nova Sites: the site's address is switched off (Unpublish); nothing deleted. */
     novaUnpublished?: boolean;
+    /** Nova Sites: what the owner did by hand since Nova's last turn (Undo/Restore, own edits), told to her once. */
+    novaOwnerNotes?: string[];
 }
 
 export type AgentState = PhasicState | AgenticState | ThinkState;

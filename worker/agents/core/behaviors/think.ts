@@ -508,7 +508,7 @@ export class ThinkCodingBehavior
 			await this.configureThinkAgent().catch((e) => this.logger.warn('ThinkAgent reconfigure failed', e));
 			const headBefore = await this.novaHead().catch(() => null);
 			try {
-				await this.runPrompt(compiled);
+				await this.runPrompt(this.novaWithOwnerNotes(compiled));
 				await this.callSpace((space) => space.gitCommit('chore: think turn changes')).catch(() => undefined);
 				const headAfter = await this.novaHead().catch(() => null);
 				if (headAfter && headAfter !== headBefore) {
@@ -1166,6 +1166,7 @@ export class ThinkCodingBehavior
 		const shortFind = find.length > 40 ? `${find.slice(0, 37)}…` : find;
 		const shortReplace = replace.length > 40 ? `${replace.slice(0, 37)}…` : replace;
 		const done = await this.novaCommitOwnerChange(result.path, result.content, `Changed “${shortFind}” to “${shortReplace}”`);
+		this.novaNoteForAgent(`They changed the text “${shortFind}” to “${shortReplace}” in ${result.path}.`);
 		return { path: result.path, ...done, ms: Date.now() - started };
 	}
 
@@ -1212,6 +1213,29 @@ export class ThinkCodingBehavior
 		return toHistory(log, this.state.novaLabels ?? {});
 	}
 
+	/** Remember something the owner did by hand, so Nova's next turn knows (her conversation doesn't). */
+	private novaNoteForAgent(note: string): void {
+		const notes = [...(this.state.novaOwnerNotes ?? []), note].slice(-8);
+		this.setState({ ...this.state, novaOwnerNotes: notes });
+	}
+
+	/**
+	 * The owner's request, preceded (once) by what they did by hand since Nova's last turn. Without
+	 * it Nova sees an earlier request of hers "undone" after an Undo and brings it up again.
+	 */
+	private novaWithOwnerNotes(request: string): string {
+		const notes = this.state.novaOwnerNotes ?? [];
+		if (notes.length === 0) return request;
+		this.setState({ ...this.state, novaOwnerNotes: [] });
+		return [
+			'(Context from Nova OS, not part of the owner\'s message: since your last turn the owner did this by hand. Treat it as intended; do not redo, undo or mention it unless they ask.)',
+			...notes.map((n) => `- ${n}`),
+			'',
+			'The owner\'s request now — answer and act on this only:',
+			request,
+		].join('\n');
+	}
+
 	async novaRestore(hash: string) {
 		if (this.isCodeGenerating()) throw new Error('busy');
 		const branch = this.state.currentBranch || 'main';
@@ -1221,6 +1245,11 @@ export class ThinkCodingBehavior
 		const restored = this.state.novaLabels?.[hash];
 		const plain = restored?.replace(/^(Went back to: )+/, '');
 		this.novaLabel(head, plain ? `Went back to: ${plain}` : 'Went back to an earlier version');
+		this.novaNoteForAgent(
+			plain
+				? `They went back to the version "${plain}". Every change made after it was undone on purpose.`
+				: 'They went back to an earlier version. Every change made after it was undone on purpose.',
+		);
 		this.novaPrewarm();
 		return { hash: head, previewUrl: await this.getBrowserPreviewURL() };
 	}

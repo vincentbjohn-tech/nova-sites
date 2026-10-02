@@ -1,3 +1,4 @@
+import type { ModelMessage } from 'ai';
 /**
  * Nova Sites: changes the owner makes by hand, without the agent. Pure
  * functions over the site's source files, so they are fast (no model) and
@@ -303,4 +304,23 @@ export function readHeadMeta(html: string): { iconUrl: string | null; shareImage
 	const icon = /<link\s+rel=["'](?:shortcut )?icon["'][^>]*href=["']([^"']*)["']/i.exec(html)?.[1] ?? null;
 	const share = /<meta\s+property=["']og:image["'][^>]*content=["']([^"']*)["']/i.exec(html)?.[1] ?? null;
 	return { iconUrl: icon && !icon.startsWith('data:') ? icon.replace(/&amp;/g, '&') : icon, shareImageUrl: share ? share.replace(/&amp;/g, '&') : null };
+}
+
+/**
+ * An earlier owner message is context, never an instruction for this turn.
+ * Without the label the model sometimes answers (or redoes) an old request
+ * instead of the newest one, especially after the owner undid it.
+ */
+export const EARLIER_REQUEST_LABEL =
+	'[Earlier message from the owner, already handled in a previous turn. Context only: do not act on it, answer it or bring it up again unless the owner asks. If it was undone or left out, that was on purpose.]';
+
+export function markEarlierRequests(messages: ModelMessage[]): ModelMessage[] {
+	const lastUser = messages.map((message) => message.role).lastIndexOf('user');
+	return messages.map((message, index) => {
+		if (message.role !== 'user' || index >= lastUser) return message;
+		if (typeof message.content === 'string') {
+			return { ...message, content: `${EARLIER_REQUEST_LABEL}\n${message.content}` };
+		}
+		return { ...message, content: [{ type: 'text' as const, text: EARLIER_REQUEST_LABEL }, ...message.content] };
+	});
 }
