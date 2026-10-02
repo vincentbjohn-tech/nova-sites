@@ -25,9 +25,11 @@ export class NovaSitesController extends BaseController {
 		const id = context.pathParams.id;
 		const userId = context.user?.id;
 		if (!id || !userId) return null;
-		const owner = await new AppService(env).getAppOwnerId(id);
-		if (owner !== userId) return null;
-		return getAgentStub(env, id);
+		// The site's own agent knows its owner: no cold database read (~1.8 s) on every first open.
+		// An id that isn't a site has no owner there, and falls back to the database answer.
+		const stub = await getAgentStub(env, id);
+		const owner = (await stub.novaOwner().catch(() => null)) ?? (await new AppService(env).getAppOwnerId(id));
+		return owner === userId ? stub : null;
 	}
 
 	private static async body(request: Request): Promise<Json> {

@@ -32,6 +32,8 @@ export interface AgentInfrastructure<TState extends BaseProjectState> {
     clearConversation(): void;
     /** Nova Sites: a persisted one-minute check while a request is being worked on (survives restarts). */
     novaWatch(on: boolean): Promise<void>;
+    /** Resolves once start-up's slow, generation-only reads (user model settings) are in. */
+    novaReady(): Promise<void>;
     
     // Services
     readonly fileManager: FileManager;

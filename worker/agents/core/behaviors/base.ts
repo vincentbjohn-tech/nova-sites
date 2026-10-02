@@ -472,6 +472,7 @@ export abstract class BaseCodingBehavior<TState extends BaseProjectState>
             totalFiles: this.getTotalFiles()
         });
         await this.ensureTemplateDetails();
+        await this.infrastructure.novaReady().catch(() => undefined);
         try {
             await this.build();
         } catch (error) {
