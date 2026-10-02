@@ -144,6 +144,10 @@ export interface ThinkState extends BaseProjectState {
     novaUnpublished?: boolean;
     /** Nova Sites: what the owner did by hand since Nova's last turn (Undo/Restore, own edits), told to her once. */
     novaOwnerNotes?: string[];
+    /** The owner's request being worked on right now, persisted so a restart can pick it up again. */
+    /** Nova's final reply for each finished change (commit hash → her words), so a reload shows it. */
+    novaReplies?: Record<string, string>;
+    novaActiveTurn?: { request: string; startedAt: number; lastProgressAt: number; resumes: number };
 }
 
 export type AgentState = PhasicState | AgenticState | ThinkState;

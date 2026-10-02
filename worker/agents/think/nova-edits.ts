@@ -270,6 +270,8 @@ export interface HistoryEntry {
 	message: string;
 	by: 'nova' | 'you';
 	at: string;
+	/** Nova's final words for this change, when she made it. */
+	reply?: string;
 }
 
 /**

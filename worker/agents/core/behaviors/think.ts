@@ -515,6 +515,66 @@ export class ThinkCodingBehavior
 	/** Main loop: drain pendingUserInputs by driving the ThinkAgent. */
 	// (NOVA_CONTINUE_* below: how a turn that stopped halfway is picked up again.)
 	async build(): Promise<void> {
+		await this.novaResumeActive();
+		try {
+			await this.drainRequests();
+		} finally {
+			if (!this.state.novaActiveTurn && this.state.pendingUserInputs.length === 0) {
+				await this.infrastructure.novaWatch(false).catch(() => undefined);
+			}
+		}
+	}
+
+	private novaSetActive(turn: ThinkState['novaActiveTurn']): void {
+		this.setState({ ...this.state, novaActiveTurn: turn });
+	}
+
+	/**
+	 * A request whose work stopped without finishing (the builder restarted or was evicted mid-turn):
+	 * carry on from where it stopped, through the same path as a stalled turn, at most NOVA_CONTINUE_TRIES
+	 * times in all; then say so. The finished work is labelled with the owner's request, as usual.
+	 */
+	private async novaResumeActive(): Promise<void> {
+		const active = this.state.novaActiveTurn;
+		if (!active) return;
+		if (active.resumes >= NOVA_CONTINUE_TRIES) {
+			this.novaSetActive(undefined);
+			this.novaSay(
+				"I couldn't finish that: my work was interrupted and I couldn't pick it up again. What I'd done so far is saved in History; nothing else was changed. Send it again and I'll carry on.",
+			);
+			return;
+		}
+		this.novaSetActive({ ...active, resumes: active.resumes + 1, lastProgressAt: Date.now() });
+		this.logger.warn('Resuming an interrupted turn', { resumes: active.resumes + 1 });
+		await this.configureThinkAgent().catch((e) => this.logger.warn('ThinkAgent reconfigure failed', e));
+		const headBefore = await this.novaHead().catch(() => null);
+		const turn = await this.runPromptSafely(NOVA_CONTINUE_PROMPT);
+		if (turn.endedMidway) return; // the watchdog tries again (or says so after the last try)
+		await this.callSpace((space) => space.gitCommit('chore: think turn changes')).catch(() => undefined);
+		const headAfter = await this.novaHead().catch(() => null);
+		if (headAfter && headAfter !== headBefore) {
+			this.novaLabel(headAfter, active.request);
+			this.novaKeepReply(headAfter, turn.reply);
+			this.novaPrewarm();
+		}
+		this.novaSetActive(undefined);
+		if (!this.isMVPGenerated()) this.setMVPGenerated();
+	}
+
+	/** Called every minute while a request is active: picks it up if nothing has moved for a while. */
+	async novaWatchdog(): Promise<void> {
+		const active = this.state.novaActiveTurn;
+		if (!active) {
+			if (this.state.pendingUserInputs.length === 0) await this.infrastructure.novaWatch(false);
+			return;
+		}
+		if (this.isCodeGenerating()) return; // still working in this instance
+		if (Date.now() - active.lastProgressAt < NOVA_STALL_MS) return;
+		this.generationPromise = this.buildWrapper();
+		await this.generationPromise;
+	}
+
+	private async drainRequests(): Promise<void> {
 		if (!this.isMVPGenerated() && this.state.query && this.state.pendingUserInputs.length === 0) {
 			this.setState({ ...this.state, pendingUserInputs: [this.state.query] });
 		}
@@ -524,6 +584,9 @@ export class ThinkCodingBehavior
 			this.setState({ ...this.state, pendingUserInputs: [] });
 
 			const compiled = pending.join('\n');
+			// Persisted before any work: a restart mid-turn finds it and carries on (novaWatchdog).
+			this.novaSetActive({ request: compiled, startedAt: Date.now(), lastProgressAt: Date.now(), resumes: 0 });
+			await this.infrastructure.novaWatch(true).catch((e) => this.logger.warn('novaWatch on failed', e));
 			// Fresh config for every request: the preview link the agent checks in a
 			// real browser is signed and expires, so an old one answers 401.
 			await this.configureThinkAgent().catch((e) => this.logger.warn('ThinkAgent reconfigure failed', e));
@@ -545,6 +608,7 @@ export class ThinkCodingBehavior
 				const headAfter = await this.novaHead().catch(() => null);
 				if (headAfter && headAfter !== headBefore) {
 					this.novaLabel(headAfter, compiled);
+					this.novaKeepReply(headAfter, turn.reply);
 					this.novaPrewarm();
 				}
 			} catch (e) {
@@ -552,9 +616,11 @@ export class ThinkCodingBehavior
 				this.broadcast(WebSocketMessageResponses.ERROR, {
 					error: e instanceof Error ? e.message : String(e),
 				});
+				this.novaSetActive(undefined);
 				break;
 			}
 
+			this.novaSetActive(undefined);
 			if (!this.isMVPGenerated()) {
 				this.setMVPGenerated();
 			}
@@ -569,7 +635,7 @@ export class ThinkCodingBehavior
 	 * Submit a prompt to the ThinkAgent and translate its streamed
 	 * `UIMessageChunk`s into VibeSDK WebSocket events.
 	 */
-	private async runPrompt(text: string): Promise<{ endedMidway: boolean }> {
+	private async runPrompt(text: string): Promise<{ endedMidway: boolean; reply?: string }> {
 		const conversationId = IdGenerator.generateConversationId();
 		// Did the model stop right after a tool came back (no words after it)? Then the job is half done.
 		let afterTool = false;
@@ -593,6 +659,8 @@ export class ThinkCodingBehavior
 					return;
 				}
 				const type = (chunk as { type?: string }).type;
+				const active = this.state.novaActiveTurn;
+				if (active && Date.now() - active.lastProgressAt > 15_000) this.novaSetActive({ ...active, lastProgressAt: Date.now() });
 				if (type === 'tool-output-available' || type === 'tool-output-error' || type === 'tool-input-available') afterTool = true;
 				else if (type === 'text-delta' && (chunk as { delta?: string }).delta?.trim()) afterTool = false;
 				return this.translateChunk(chunk, conversationId, accumulated, seenWrittenFiles, toolNames, toolInputs);
@@ -622,14 +690,14 @@ export class ThinkCodingBehavior
 				});
 			}
 		}
-		return { endedMidway: afterTool };
+		return { endedMidway: afterTool, reply: accumulated.text || undefined };
 	}
 
 	/**
 	 * A turn that throws partway (the model's stream broke, a tool call came back malformed) is a turn
 	 * that stopped midway, not the end of the owner's request: the build loop picks it up again.
 	 */
-	private async runPromptSafely(text: string): Promise<{ endedMidway: boolean }> {
+	private async runPromptSafely(text: string): Promise<{ endedMidway: boolean; reply?: string }> {
 		try {
 			return await this.runPrompt(text);
 		} catch (e) {
@@ -1279,7 +1347,17 @@ export class ThinkCodingBehavior
 
 	async novaHistory() {
 		const log = await this.callSpace((space) => space.gitLog(200));
-		return toNetHistory(log, this.state.novaLabels ?? {});
+		const replies = this.state.novaReplies ?? {};
+		return toNetHistory(log, this.state.novaLabels ?? {}).map((e) => (replies[e.hash] ? { ...e, reply: replies[e.hash] } : e));
+	}
+
+	/** Keep Nova's final words for a finished change (the last 50, 6,000 characters each). */
+	private novaKeepReply(hash: string, reply: string | undefined): void {
+		if (!reply?.trim()) return;
+		const all = { ...(this.state.novaReplies ?? {}), [hash]: reply.trim().slice(0, 6000) };
+		const keys = Object.keys(all);
+		for (const k of keys.slice(0, Math.max(0, keys.length - 50))) delete all[k];
+		this.setState({ ...this.state, novaReplies: all });
 	}
 
 	/** Remember something the owner did by hand, so Nova's next turn knows (her conversation doesn't). */
@@ -1467,6 +1545,8 @@ function isFileDeleteTool(name: string): boolean {
 	return n === 'delete' || n === 'rm' || n === 'remove';
 }
 
+/** No progress for this long while a request is active (and nothing running): it was interrupted. */
+const NOVA_STALL_MS = 90_000;
 /** How often a turn that stopped right after a tool result is picked up again before Nova says so. */
 const NOVA_CONTINUE_TRIES = 3;
 const NOVA_CONTINUE_PROMPT =

@@ -463,7 +463,7 @@ export abstract class BaseCodingBehavior<TState extends BaseProjectState>
         return this.state.mvpGenerated;
     }
 
-    private async buildWrapper() {
+    protected async buildWrapper() {
         this.broadcast(WebSocketMessageResponses.GENERATION_STARTED, {
             message: 'Starting code generation',
             totalFiles: this.getTotalFiles()
