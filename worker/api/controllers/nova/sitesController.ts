@@ -70,7 +70,7 @@ export class NovaSitesController extends BaseController {
 
 	/** POST /api/nova/sites {prompt} → {id}; the agent starts building right away. */
 	static async create(request: Request, env: Env, ctx: ExecutionContext, context: RouteContext): Promise<Response> {
-		const prompt = NovaSitesController.str((await NovaSitesController.body(request)).prompt, 20_000)?.trim();
+		const prompt = NovaSitesController.str((await NovaSitesController.body(request)).prompt, 100_000)?.trim();
 		if (!prompt) return NovaSitesController.createErrorResponse('Describe the site you want', 400);
 		const forwarded = new Request(new URL('/api/agent', request.url), {
 			method: 'POST',
