@@ -1525,6 +1525,13 @@ export class ThinkCodingBehavior
 
 	async novaSummary() {
 		const address = this.state.novaUnpublished ? null : this.state.cloudflareDeploymentUrl ?? null;
+		// The four reads are independent: side by side, not one after another (opening a site took ~3 s).
+		const [previewUrl, unpublished, files, home] = await Promise.all([
+			this.getBrowserPreviewURL(),
+			this.novaUnpublished(),
+			this.callSpace((space) => space.glob('**/*')),
+			this.callSpace((space) => space.readFile('public/index.html')).catch(() => ''),
+		]);
 		return {
 			id: this.getAgentId(),
 			title: this.state.blueprint?.title || this.state.projectName || 'Your site',
@@ -1539,10 +1546,10 @@ export class ThinkCodingBehavior
 						steps: this.state.novaActiveTurn.steps ?? 0,
 					}
 				: null,
-			previewUrl: await this.getBrowserPreviewURL(),
-			unpublished: await this.novaUnpublished(),
-			files: (await this.callSpace((space) => space.glob('**/*'))).filter((p) => !p.startsWith('.think/')),
-			...novaHomeMeta(await this.callSpace((space) => space.readFile('public/index.html')).catch(() => '')),
+			previewUrl,
+			unpublished,
+			files: files.filter((p) => !p.startsWith('.think/')),
+			...novaHomeMeta(home),
 		};
 	}
 }
