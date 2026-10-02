@@ -21,6 +21,7 @@ import { createDeploySpaceTool } from './deploy-tool';
 import { createCommitTool } from './commit-tool';
 import { createSetTitleTool } from './set-title-tool';
 import { selectThinkContextMessages } from './context-selector';
+import { serialByFile } from './serial-file-tools';
 import { markEarlierRequests } from './nova-edits';
 import { getUserConfigurableSettings } from '../../config';
 import { RateLimitService } from '../../services/rate-limit/rateLimits';
@@ -320,6 +321,9 @@ export class ThinkAgent extends Think<Env> {
 		return [createThinkSkillSource()];
 	}
 
+	/** Per-file queues for write/edit/delete (see serial-file-tools.ts). */
+	private readonly fileQueues = new Map<string, Promise<unknown>>();
+
 	override getTools(): ToolSet {
 		const ops = createSpaceWorkspaceOps(() => this.getSpaceStub());
 		const previewUrl = this.getConfig<ThinkAgentConfig>()?.previewUrl;
@@ -327,12 +331,13 @@ export class ThinkAgent extends Think<Env> {
 		// versions win the tool-merge. Bash is disabled via `workspaceBash`.
 		return {
 			read: createReadTool({ ops }),
-			write: createWriteTool({ ops }),
-			edit: createEditTool({ ops }),
+			// One at a time per file: parallel edits to one file used to erase each other.
+			write: serialByFile(createWriteTool({ ops }), this.fileQueues),
+			edit: serialByFile(createEditTool({ ops }), this.fileQueues),
 			list: createListTool({ ops }),
 			find: createFindTool({ ops }),
 			grep: createGrepTool({ ops }),
-			delete: createDeleteTool({ ops }),
+			delete: serialByFile(createDeleteTool({ ops }), this.fileQueues),
 			// Save a restore point without deploying. The model decides when.
 			commit: createCommitTool({ getStub: () => this.getSpaceStub() }),
 			// Commit + deploy the SpaceDO branch so the preview rebuilds.
