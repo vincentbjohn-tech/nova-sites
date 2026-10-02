@@ -663,7 +663,12 @@ export class ThinkCodingBehavior
 				}
 				const type = (chunk as { type?: string }).type;
 				const active = this.state.novaActiveTurn;
-				if (active && Date.now() - active.lastProgressAt > 15_000) this.novaSetActive({ ...active, lastProgressAt: Date.now() });
+				if (active && type === 'tool-input-start') {
+					// Steps so far, so another device opening the editor mid-job shows where she is.
+					this.novaSetActive({ ...active, steps: (active.steps ?? 0) + 1, lastProgressAt: Date.now() });
+				} else if (active && Date.now() - active.lastProgressAt > 15_000) {
+					this.novaSetActive({ ...active, lastProgressAt: Date.now() });
+				}
 				if (type === 'tool-output-available' || type === 'tool-output-error' || type === 'tool-input-available') {
 					afterTool = true;
 					accumulated.afterTool = true;
@@ -1525,7 +1530,15 @@ export class ThinkCodingBehavior
 			title: this.state.blueprint?.title || this.state.projectName || 'Your site',
 			address,
 			status: address ? ('live' as const) : ('draft' as const),
-			building: this.isCodeGenerating(),
+			building: this.isCodeGenerating() || !!this.state.novaActiveTurn,
+			// The request being worked on right now (any device can show it after a reload).
+			working: this.state.novaActiveTurn
+				? {
+						request: this.novaOwnerWords(this.state.novaActiveTurn.request).slice(0, 4000),
+						startedAt: new Date(this.state.novaActiveTurn.startedAt).toISOString(),
+						steps: this.state.novaActiveTurn.steps ?? 0,
+					}
+				: null,
 			previewUrl: await this.getBrowserPreviewURL(),
 			unpublished: await this.novaUnpublished(),
 			files: (await this.callSpace((space) => space.glob('**/*'))).filter((p) => !p.startsWith('.think/')),
