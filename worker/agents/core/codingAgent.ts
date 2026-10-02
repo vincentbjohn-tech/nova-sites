@@ -230,15 +230,17 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
         
         // Just in case
         await this.gitInit();
-        
         await this.behavior.ensureTemplateDetails();
         this.logger().info(`Agent ${this.getAgentId()} session: ${this.state.sessionId} onStart processed successfully`);
 
         // Load the latest user configs
         const modelConfigService = new ModelConfigService(this.env);
-        const userConfigsRecord = await modelConfigService.getUserModelConfigs(this.state.metadata.userId);
-        this.behavior.setUserModelConfigs(userConfigsRecord);
-        this.logger().info(`Agent ${this.getAgentId()} session: ${this.state.sessionId} onStart: User configs loaded successfully`, {userConfigsRecord});
+        // Only generation needs these (a cold database read, ~0.9 s): load them in the background so
+        // opening a site doesn't wait; work waits for them (novaReady) before it starts.
+        this.modelConfigsReady = modelConfigService
+            .getUserModelConfigs(this.state.metadata.userId)
+            .then((userConfigsRecord) => this.behavior.setUserModelConfigs(userConfigsRecord))
+            .catch((error) => this.logger().warn('Loading user model configs failed', error));
     }
     
     onConnect(connection: Connection, ctx: ConnectionContext) {
@@ -442,6 +444,17 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
     novaPublish() { return this.novaBehavior().novaPublish(); }
     novaUnpublish() { return this.novaBehavior().novaUnpublish(); }
     novaSetAddress(name: string) { return this.novaBehavior().novaSetAddress(name); }
+
+    private modelConfigsReady: Promise<void> = Promise.resolve();
+
+    novaReady(): Promise<void> {
+        return this.modelConfigsReady;
+    }
+
+    /** The owner's user id as this site knows it (no database read: the ownership check for reads). */
+    novaOwner(): string | null {
+        return this.state.query ? this.state.metadata?.userId ?? null : null;
+    }
 
     /** Nova Sites: the one-minute check while a request is worked on; persisted, so it fires after a restart too. */
     async novaWatch(on: boolean): Promise<void> {
