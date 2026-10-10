@@ -45,6 +45,8 @@ export interface PhaseOutput {
 	dropped: string[];
 	/** Paths whose block never ended (not written). */
 	unterminated: string[];
+	/** Paths with a block that holds nothing usable (an EDIT with no REPLACE): never "just words". */
+	malformed: string[];
 }
 
 /** `public/…` with no way out of it. */
@@ -67,7 +69,7 @@ function body(raw: string, keepTrailingNewline: boolean): string {
 const OPEN = /<<<(FILE|EDIT|APPEND)(?: ([^>\n]+)>>>|>>> *([^\s<>]+)) *\n?/g;
 
 export function parsePhaseOutput(text: string): PhaseOutput {
-	const out: PhaseOutput = { files: [], edits: [], dropped: [], unterminated: [] };
+	const out: PhaseOutput = { files: [], edits: [], dropped: [], unterminated: [], malformed: [] };
 	const reply = /<<<REPLY>>>\n?([\s\S]*?)<<<END REPLY>>>/.exec(text);
 	if (reply) out.reply = reply[1].trim() || undefined;
 	const name = /<<<NAME>>>\n?([\s\S]*?)<<<END NAME>>>/.exec(text);
@@ -104,7 +106,10 @@ export function parsePhaseOutput(text: string): PhaseOutput {
 			if (added.trim()) out.edits.push({ path, find: '', replace: added });
 			continue;
 		}
-		for (const pair of inner.split('<<<FIND>>>').slice(1)) {
+		// An EDIT written without its <<<FIND>>> line: the text before <<<REPLACE>>> is what it finds.
+		const pairs = inner.includes('<<<FIND>>>') ? inner.split('<<<FIND>>>').slice(1) : inner.includes('<<<REPLACE>>>') ? [inner] : [];
+		const had = out.edits.length;
+		for (const pair of pairs) {
 			const at = pair.indexOf('<<<REPLACE>>>');
 			if (at < 0) continue;
 			// A stray XML-style closer ("</FIND>", "</REPLACE>") on its own last line is a slip, not page text.
@@ -113,6 +118,7 @@ export function parsePhaseOutput(text: string): PhaseOutput {
 			const replace = unclose(body(pair.slice(at + '<<<REPLACE>>>'.length).replace(/^\n/, ''), false));
 			if (find.trim()) out.edits.push({ path, find, replace });
 		}
+		if (out.edits.length === had) out.malformed.push(path);
 	}
 	return out;
 }

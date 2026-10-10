@@ -103,6 +103,7 @@ export function mergeAnswers(first: PhaseOutput, retry: PhaseOutput): PhaseOutpu
 		layout: retry.layout ?? first.layout,
 		dropped: [...first.dropped, ...retry.dropped],
 		unterminated: [...first.unterminated.filter(kept), ...retry.unterminated],
+		malformed: [...first.malformed.filter(kept), ...retry.malformed],
 	};
 }
 
@@ -196,9 +197,13 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 		fullPages = false,
 	): Promise<{ writes: Map<string, string>; reply?: string; layout?: string }> => {
 		for (let attempt = 0; ; attempt++) {
+			// Rules for a stylesheet the site doesn't have (an older site keeps its styles in the page): they go
+			// into the page's own <style>, so they take effect (11 Oct, emerald buttons).
+			out = await cssIntoPage(out);
 			const writes = new Map<string, string>();
 			for (const f of out.files) writes.set(f.path, f.content);
 			const problems: string[] = out.unterminated.map((p) => `The block for ${p} was cut off: write it again, whole.`);
+			for (const p of out.malformed) problems.push(`The block for ${p} could not be read: an EDIT is <<<FIND>>> the exact current text <<<REPLACE>>> the new text <<<END EDIT>>>.`);
 			// A planned file the answer never wrote: the phase isn't done (seen 10 Oct: a page phase that
 			// answered with one sentence and no file).
 			const touched = new Set([...out.files.map((f) => f.path), ...out.edits.map((e) => e.path)]);
@@ -267,6 +272,32 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 		has.known = true;
 	};
 	let skipped = false;
+
+	/** APPEND blocks aimed at a .css file the site doesn't have → the end of a page's own <style> (or a new one). */
+	const cssIntoPage = async (o: PhaseOutput): Promise<PhaseOutput> => {
+		const appends = o.edits.filter((e) => e.find === '' && /\.css$/.test(e.path));
+		if (!appends.length) return o;
+		const paths = new Set((await deps.listFiles()).map((f) => f.replace(/^\/+/, '')));
+		const missing = appends.filter((e) => !paths.has(e.path) && !o.files.some((f) => f.path === e.path));
+		if (!missing.length) return o;
+		const page = [...o.files.map((f) => f.path), ...o.edits.map((e) => e.path)].find((p) => /\.html?$/.test(p)) ?? (paths.has('public/index.html') ? 'public/index.html' : null);
+		if (!page) return o;
+		const rules = missing.map((e) => e.replace).join('\n');
+		const edits = o.edits.filter((e) => !missing.includes(e));
+		const file = o.files.find((f) => f.path === page);
+		const current = file?.content ?? (await deps.readFile(page).catch(() => ''));
+		const at = current.lastIndexOf('</style>');
+		const updated = at >= 0 ? `${current.slice(0, at).replace(/\n*$/, '')}\n${rules}\n${current.slice(at)}` : current.replace(/<\/head>/i, `<style>\n${rules}\n</style>\n</head>`);
+		if (updated === current) return o;
+		// The page's edits apply first, then the rules: make the page whole with its edits, as a FILE.
+		const pageEdits = edits.filter((e) => e.path === page);
+		const applied = applyEdits(updated, pageEdits);
+		return {
+			...o,
+			files: [...o.files.filter((f) => f.path !== page), { path: page, content: applied.content }],
+			edits: [...edits.filter((e) => e.path !== page), ...applied.missed.map((m) => ({ path: page, ...m }))],
+		};
+	};
 
 	/** Write a phase's files all together, deploy (once there is a styled page to show), say so on the socket. */
 	const commitPhase = async (name: string, writes: Map<string, string>, index: number, count: number) => {

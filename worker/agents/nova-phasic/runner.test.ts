@@ -440,3 +440,23 @@ describe('a small change is named in the owner\'s words, never "Your change"', (
 		expect(n2[0]).not.toBe('Your change');
 	});
 });
+
+describe('never claim a change that was not made (Vincent, 11 Oct)', () => {
+	it('a first answer whose blocks are all unusable is retried, then fails honestly — never "words only"', async () => {
+		const bad = '<<<EDIT public/index.html>>>\nno replace here\n<<<END EDIT>>>\n<<<REPLY>>>\nThe buttons are emerald now.\n<<<END REPLY>>>';
+		const s = fakeSite({ 'public/index.html': '<a class="b">x</a>' }, [bad, bad]);
+		const r = await runRequest(s.deps, { request: 'emerald buttons' });
+		expect(r.changed).toBe(false);
+		expect(r.failed).toHaveLength(1);
+		expect(r.reply).not.toContain('emerald now');
+	});
+	it('rules for a missing styles.css go into the page\'s own <style> (an older site with inline styles)', async () => {
+		const s = fakeSite({ 'public/index.html': '<head><style>.btn{background:gold}</style></head><a class="btn">x</a>' }, [
+			'<<<APPEND public/styles.css>>>\n.btn{box-shadow:0 0 14px #2ecc8f}\n<<<END APPEND>>>\n<<<REPLY>>>\nThey glow now.\n<<<END REPLY>>>',
+		]);
+		const r = await runRequest(s.deps, { request: 'make the buttons glow' });
+		expect(r.failed).toEqual([]);
+		expect(s.files['public/index.html']).toContain('.btn{background:gold}\n.btn{box-shadow:0 0 14px #2ecc8f}\n</style>');
+		expect(s.files['public/styles.css']).toBeUndefined();
+	});
+});
