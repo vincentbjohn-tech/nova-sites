@@ -66,8 +66,32 @@ function cleanPlan(raw: unknown): Plan {
 		...(typeof o.title === 'string' && o.title.trim() ? { title: o.title.trim().slice(0, 60) } : {}),
 		// With the contract in hand nothing waits: the look and every page are written side by side
 		// (the model tends to keep pages waiting for the look out of habit; seen 10 Oct).
-		phases: phases.length ? (classes && (header || footer) ? phases.map((p) => ({ ...p, after: [] })) : phases) : [FALLBACK],
+		phases: phases.length ? (classes && (header || footer) ? sideBySide(phases) : phases) : [FALLBACK],
 	};
+}
+
+/** A page's name in the owner's words from its file ("public/book-a-call.html" → "Book a call page"). */
+function pageName(path: string): string {
+	const base = path.replace(/^public\//, '').replace(/\.html?$/, '');
+	if (base === 'index') return 'Home page';
+	const words = base.replace(/[-_/]+/g, ' ').trim();
+	return `${words.charAt(0).toUpperCase()}${words.slice(1)} page`;
+}
+
+/** With a design contract nothing waits, and the look is its own phase: a phase that bundles the
+ *  stylesheet with pages is split into the look and one phase per page (seen 10 Oct: "Style system and
+ *  home page" alone took 96 s while the other pages were long done). */
+function sideBySide(phases: Phase[]): Phase[] {
+	const out: Phase[] = [];
+	for (const p of phases) {
+		const css = p.files.filter((f) => f === 'public/styles.css');
+		const rest = p.files.filter((f) => f !== 'public/styles.css');
+		if (css.length && rest.length) {
+			out.push({ name: 'Your look', files: css, after: [] });
+			for (const f of rest) out.push({ name: pageName(f), files: [f], after: [] });
+		} else out.push({ ...p, after: [] });
+	}
+	return out.slice(0, MAX_PHASES);
 }
 
 export function parseFirstAnswer(text: string): FirstAnswer {

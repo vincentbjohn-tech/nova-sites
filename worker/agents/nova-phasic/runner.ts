@@ -70,6 +70,21 @@ function order(paths: string[]): string[] {
 
 class Problem extends Error {}
 
+/** A retry's blocks over the first answer's: a path the retry writes or edits is entirely the retry's;
+ *  every other path keeps what the first answer had. */
+export function mergeAnswers(first: PhaseOutput, retry: PhaseOutput): PhaseOutput {
+	const redone = new Set([...retry.files.map((f) => f.path), ...retry.edits.map((e) => e.path)]);
+	const kept = (path: string) => !redone.has(path);
+	return {
+		files: [...first.files.filter((f) => kept(f.path)), ...retry.files],
+		edits: [...first.edits.filter((e) => kept(e.path) && !first.files.some((f) => f.path === e.path && !kept(f.path))), ...retry.edits],
+		reply: retry.reply ?? first.reply,
+		layout: retry.layout ?? first.layout,
+		dropped: [...first.dropped, ...retry.dropped],
+		unterminated: [...first.unterminated.filter(kept), ...retry.unterminated],
+	};
+}
+
 /** A styled brief's reference page (a whole example site in the chosen style): only the call that
  *  sets the look needs it; the plan and pages built on the home page get the style's rules alone. */
 const REFERENCE = /(REFERENCE IMPLEMENTATION[^\n]*\n)```html\n[\s\S]*?\n```\n?/;
@@ -186,7 +201,9 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 			}
 			if (!problems.length) return { writes, reply: out.reply, layout: out.layout };
 			if (attempt >= 1) throw new Problem(problems.join('\n'));
-			out = await retry(problems.join('\n\n'), filesBlock(current));
+			// The retry answers only what was wrong or missing: it adds to the first answer (seen 10 Oct: a
+			// look phase's stylesheet was dropped because its retry only brought the missing home page).
+			out = mergeAnswers(out, await retry(problems.join('\n\n'), filesBlock(current)));
 		}
 	};
 

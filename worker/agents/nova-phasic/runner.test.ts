@@ -367,3 +367,28 @@ describe('facts are never invented', () => {
 		}
 	});
 });
+
+describe('a retry adds to the first answer, it does not replace it', () => {
+	it('the look phase answered with the stylesheet only; the retry with the home page: both are written', async () => {
+		const plan = `<<<PLAN>>>\n${JSON.stringify({ reply: 'x', phases: [{ name: 'Look and home', files: ['public/styles.css', 'public/index.html'] }] })}\n<<<END PLAN>>>`;
+		const s = fakeSite({}, [
+			plan,
+			'<<<FILE public/styles.css>>>\n.btn{}\n<<<END FILE>>>',
+			'<<<FILE public/index.html>>>\n<a class="btn">Book</a>\n<<<END FILE>>>',
+		]);
+		const r = await runRequest(s.deps, { request: 'A site' });
+		expect(r.failed).toEqual([]);
+		expect(Object.keys(s.files).sort()).toEqual(['public/index.html', 'public/styles.css']);
+	});
+
+	it('a retry that fixes one missed edit keeps the edits that applied the first time', async () => {
+		const s = fakeSite({ 'public/index.html': '<h1>A</h1><p>B</p>' }, [
+			'<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>A</h1>\n<<<REPLACE>>>\n<h1>A2</h1>\n<<<END EDIT>>>\n<<<EDIT public/about.html>>>\n<<<FIND>>>\nx\n<<<REPLACE>>>\ny\n<<<END EDIT>>>',
+			'<<<FILE public/about.html>>>\n<h1>About</h1>\n<<<END FILE>>>',
+		]);
+		const r = await runRequest(s.deps, { request: 'Change A and add about' });
+		expect(r.failed).toEqual([]);
+		expect(s.files['public/index.html']).toBe('<h1>A2</h1><p>B</p>');
+		expect(s.files['public/about.html']).toContain('About');
+	});
+});

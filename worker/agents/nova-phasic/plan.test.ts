@@ -123,3 +123,24 @@ describe('a design contract makes every phase independent', () => {
 		expect(a.plan.layout).toBe('<header>H</header>\n<footer>F</footer>');
 	});
 });
+
+describe('with a contract, the look is its own phase', () => {
+	it('a phase that bundles the stylesheet with pages is split: the look, then one phase per page, all side by side', () => {
+		const a = parseFirstAnswer(
+			`<<<PLAN>>>\n${JSON.stringify({
+				reply: 'x',
+				phases: [
+					{ name: 'Style system and home page', files: ['public/styles.css', 'public/index.html'] },
+					{ name: 'Services with prices', files: ['public/services.html'] },
+				],
+				design: { classes: '.btn', header: '<header/>', footer: '<footer/>' },
+			})}\n<<<END PLAN>>>`,
+		);
+		if (a.kind !== 'plan') throw new Error('not a plan');
+		expect(a.plan.phases).toEqual([
+			{ name: 'Your look', files: ['public/styles.css'], after: [] },
+			{ name: 'Home page', files: ['public/index.html'], after: [] },
+			{ name: 'Services with prices', files: ['public/services.html'], after: [] },
+		]);
+	});
+});
