@@ -643,7 +643,7 @@ export class ThinkCodingBehavior
 
 	/** The phased builder runs this site's requests (`NOVA_PHASIC=on` and a model gateway set up). */
 	private novaPhasic(): boolean {
-		return phasicOn(this.env) && phaseModel(this.env) !== null;
+		return phasicOn(this.env, this.state.metadata?.userId) && phaseModel(this.env) !== null;
 	}
 
 	/**

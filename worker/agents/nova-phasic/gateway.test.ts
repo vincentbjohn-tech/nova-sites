@@ -71,3 +71,14 @@ describe('the look runs at its own effort', () => {
 		expect(seen).toEqual(['high', 'high']);
 	});
 });
+
+describe('the switch per account (try it on a test account while everyone else stays on the old agent)', () => {
+	it('NOVA_PHASIC=on is everyone; NOVA_PHASIC_USERS lists builder user ids that get it; otherwise off', async () => {
+		const { phasicOn } = await import('./gateway');
+		expect(phasicOn({ NOVA_PHASIC: 'on' }, 'anyone')).toBe(true);
+		expect(phasicOn({ NOVA_PHASIC_USERS: 'u-test, u-2' }, 'u-test')).toBe(true);
+		expect(phasicOn({ NOVA_PHASIC_USERS: 'u-test, u-2' }, 'u-vincent')).toBe(false);
+		expect(phasicOn({}, 'u-test')).toBe(false);
+		expect(phasicOn({ NOVA_PHASIC_USERS: '' }, '')).toBe(false);
+	});
+});
