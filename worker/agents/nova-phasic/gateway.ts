@@ -31,12 +31,15 @@ export function phaseModel(env: unknown, fetcher: typeof fetch = (...a) => fetch
 			method: 'POST',
 			headers: { Authorization: `Bearer ${gw.apiKey}`, 'Content-Type': 'application/json' },
 			// Plain text: the gateway's CLI route then writes the page as it is, not inside a JSON string.
-			body: JSON.stringify({ model, messages, stream: false, response_format: { type: 'text' }, reasoning_effort: effort }),
+			// Streamed: the gateway sends a keep-alive every few seconds while the model writes, so a long
+			// page (look + home, 2-4 min) isn't cut off as an idle connection (10 Oct: every live call past
+			// ~2 min was lost, the same call from outside ran 280 s fine).
+			body: JSON.stringify({ model, messages, stream: true, response_format: { type: 'text' }, reasoning_effort: effort }),
 		});
 		if (!r.ok) throw new GatewayError(`the model gateway answered ${r.status}`);
-		const body = (await r.json()) as { choices?: { message?: { content?: unknown } }[] };
-		const content = body.choices?.[0]?.message?.content;
-		if (typeof content !== 'string' || !content.trim()) throw new GatewayError('the model gateway answered with no words');
+		const raw = await r.text();
+		const content = /^\s*(data:|:)/.test(raw) ? fromStream(raw) : fromJson(safeJson(raw));
+		if (!content.trim()) throw new GatewayError('the model gateway answered with no words');
 		return content;
 	};
 }
@@ -61,4 +64,37 @@ export function browserProblems(capture: {
 	for (const l of capture.logs) if (l.level === 'error' && !/favicon/i.test(l.text)) out.push(`Console error: ${l.text}`);
 	for (const f of capture.requestFailures) if (!/favicon/i.test(f.url)) out.push(`Failed to load ${f.url}: ${f.status ?? f.failure}`);
 	return [...new Set(out)];
+}
+
+function safeJson(raw: string): unknown {
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return {};
+	}
+}
+
+function fromJson(body: unknown): string {
+	const content = (body as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content;
+	return typeof content === 'string' ? content : '';
+}
+
+/** An OpenAI-style SSE stream → its text. Comments (keep-alives) are skipped; an error event is an error. */
+export function fromStream(text: string): string {
+	let out = '';
+	for (const line of text.split('\n')) {
+		if (!line.startsWith('data:')) continue;
+		const data = line.slice(5).trim();
+		if (!data || data === '[DONE]') continue;
+		let chunk: { error?: { message?: string }; choices?: { delta?: { content?: unknown } }[] };
+		try {
+			chunk = JSON.parse(data);
+		} catch {
+			continue;
+		}
+		if (chunk.error) throw new GatewayError(chunk.error.message || 'the model gateway failed mid-answer');
+		const piece = chunk.choices?.[0]?.delta?.content;
+		if (typeof piece === 'string') out += piece;
+	}
+	return out;
 }
