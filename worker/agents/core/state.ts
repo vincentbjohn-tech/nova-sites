@@ -151,7 +151,16 @@ export interface ThinkState extends BaseProjectState {
     novaHiddenHistory?: string[];
     /** Nova's final reply for each finished change (commit hash → her words), so a reload shows it. */
     novaReplies?: Record<string, string>;
-    novaActiveTurn?: { request: string; startedAt: number; lastProgressAt: number; resumes: number; steps?: number };
+    novaActiveTurn?: {
+        request: string;
+        startedAt: number;
+        lastProgressAt: number;
+        resumes: number;
+        steps?: number;
+        /** The phased builder's plan for this request and the phases already finished (a restart carries on). */
+        plan?: import('../nova-phasic/plan').Plan;
+        done?: number[];
+    };
 }
 
 export type AgentState = PhasicState | AgenticState | ThinkState;
