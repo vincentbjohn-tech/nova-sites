@@ -72,6 +72,15 @@ function order(paths: string[]): string[] {
 
 class Problem extends Error {}
 
+/**
+ * A change is in the preview until the owner presses Publish: "is live" about it is wrong (11 Oct, despite
+ * the rule in every prompt). Only "is/are (now) live", optionally followed by "in (the) preview"; the verb
+ * "live" ("clients who live nearby") is left alone.
+ */
+export function previewWords(text: string): string {
+	return text.replace(/\b(is|are)( now)? live(?: in (?:the |your )?preview)?\b/gi, (_m, verb: string, now: string | undefined) => `${verb}${now ?? ''} in your preview`);
+}
+
 /** A retry's blocks over the first answer's: a path the retry writes or edits is entirely the retry's;
  *  every other path keeps what the first answer had. */
 export function mergeAnswers(first: PhaseOutput, retry: PhaseOutput): PhaseOutput {
@@ -434,7 +443,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 		clearInterval(beat);
 	}
 
-	const reply = replies.length ? replies.slice(-3).join(' ') : changed ? 'Done — take a look on the right.' : '';
+	const reply = previewWords(replies.length ? replies.slice(-3).join(' ') : changed ? 'Done — take a look on the right.' : '');
 	return {
 		reply,
 		changed,
