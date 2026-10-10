@@ -12,7 +12,7 @@
  * the whole flow is tested with fakes. While a model call runs, a `nova_progress` line goes out every
  * few seconds: the owner never watches a silent minute.
  */
-import { applyEdits, parsePhaseOutput, unstyledClasses, type PhaseOutput } from './format';
+import { applyEdits, pageShortfalls, parsePhaseOutput, unstyledClasses, type PhaseOutput } from './format';
 import { parseFirstAnswer, runPhases, type Plan } from './plan';
 import { FIRST_SYSTEM, FIX_SYSTEM, PHASE_SYSTEM, STYLE_FIX_SYSTEM, filesBlock } from './prompts';
 
@@ -174,6 +174,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 		out: PhaseOutput,
 		retry: (problems: string, current: string) => Promise<PhaseOutput>,
 		expected: string[] = [],
+		fullPages = false,
 	): Promise<{ writes: Map<string, string>; reply?: string; layout?: string }> => {
 		for (let attempt = 0; ; attempt++) {
 			const writes = new Map<string, string>();
@@ -208,6 +209,8 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 				if (/\.html?$/.test(path) && /\[\[[^\]]*\]\]/.test(content))
 					problems.push(`${path} shows placeholder text like [[…]]: leave the missing fact out instead (never show placeholder text).`);
 			}
+			// A new site's new pages are full pages (enough sections, a photo up top), as the old builder's.
+			if (fullPages) for (const f of out.files) problems.push(...pageShortfalls(f.path, writes.get(f.path) ?? f.content));
 			if (!problems.length) return { writes, reply: out.reply, layout: out.layout };
 			deps.log?.(attempt >= 1 ? 'nova_phase_failed' : 'nova_phase_retry', { problems: problems.join('\n').slice(0, 2000) });
 			if (attempt >= 1) throw new Problem(problems.join('\n'));
@@ -333,7 +336,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 						// Every page reads the real stylesheet AND the home page it was written with (Vincent, 10 Oct).
 						const seen = site.filter((f) => shared.includes(f.path) || ph.files.includes(f.path));
 						const others = site.filter((f) => !seen.includes(f)).map((f) => f.path);
-						const prompt = `THE OWNER'S REQUEST:\n${ph.after.length ? withoutReference(input.request) : input.request}${history}\n\nTHE PLAN:\n${planText}\n\nTHIS PHASE: ${ph.name} (phase ${i + 1} of ${p.phases.length}; files: ${ph.files.join(', ') || 'as needed'})\n\n${p.classes ? `THE CLASSES (the only ones pages use; the stylesheet styles every one):\n${p.classes}\n\n` : ''}${p.layout ? `THE SHARED HEADER AND FOOTER (every page uses exactly this markup; mark the current page in the menu):\n${p.layout}\n\n` : ''}THE FILES IT BUILDS ON:\n${filesBlock(seen)}${others.length ? `\n\nOTHER FILES (not shown): ${others.join(', ')}` : ''}`;
+						const prompt = `THE OWNER'S REQUEST:\n${input.request}${history}\n\nTHE PLAN:\n${planText}\n\nTHIS PHASE: ${ph.name} (phase ${i + 1} of ${p.phases.length}; files: ${ph.files.join(', ') || 'as needed'})\n\n${p.classes ? `THE CLASSES (the only ones pages use; the stylesheet styles every one):\n${p.classes}\n\n` : ''}${p.layout ? `THE SHARED HEADER AND FOOTER (every page uses exactly this markup; mark the current page in the menu):\n${p.layout}\n\n` : ''}THE FILES IT BUILDS ON:\n${filesBlock(seen)}${others.length ? `\n\nOTHER FILES (not shown): ${others.join(', ')}` : ''}`;
 						const msgs: ChatMessage[] = [{ role: 'system', content: PHASE_SYSTEM }, { role: 'user', content: prompt }];
 						const label = ph.files.includes('public/styles.css') ? 'look' : `phase ${i + 1}`;
 						const answer = await deps.model(msgs, { label });
@@ -347,6 +350,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 									),
 								),
 							ph.files,
+							needsCss,
 						);
 						active.delete(ph.name);
 						if (done.layout && !p.layout) {

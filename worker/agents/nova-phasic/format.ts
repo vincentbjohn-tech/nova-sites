@@ -180,3 +180,24 @@ export function unstyledClasses(pages: { path: string; content: string }[], css:
 	}
 	return [...missing].sort();
 }
+
+/** Sections a full new page has (the old builder's pages, 10 Oct: home 6, the others 4). */
+const MIN_SECTIONS: Record<string, number> = { 'public/index.html': 6 };
+const DEFAULT_MIN_SECTIONS = 4;
+
+/**
+ * What a NEW page of a new site is missing to be a full page: enough sections, and a photo in the
+ * section it opens with (Vincent, 11 Oct: "as rich as the old one"; a contact page had an empty hero).
+ * Not for a 404 page, and never for edits to a page that exists.
+ */
+export function pageShortfalls(path: string, html: string): string[] {
+	if (!/^public\/.+\.html?$/.test(path) || /(^|\/)404\.html?$/.test(path)) return [];
+	const out: string[] = [];
+	const sections = [...html.matchAll(/<section\b[^>]*>([\s\S]*?)<\/section>/gi)];
+	const want = MIN_SECTIONS[path] ?? DEFAULT_MIN_SECTIONS;
+	if (sections.length < want) out.push(`${path} has ${sections.length} sections; a full page here has at least ${want}`);
+	const first = sections[0]?.[0] ?? '';
+	if (!/<img\b|<picture\b|background(-image)?\s*:[^;"]*url\(/i.test(first))
+		out.push(`${path} opens without a photo; its first section needs one (an <img> or a background image)`);
+	return out;
+}

@@ -140,3 +140,20 @@ describe('the marker with the path after it (a common slip) still counts', () =>
 		expect(out.files).toEqual([{ path: 'public/x.html', content: '<h1>x</h1>\n' }]);
 	});
 });
+
+describe('a new page is a full page (Vincent, 11 Oct: as rich as the old builder\'s)', () => {
+	it('names what a page is missing: too few sections, no photo in its opening section', async () => {
+		const { pageShortfalls } = await import('./format');
+		const thin = '<header>H</header><section class="hero"><h1>Contact</h1><p>Hi</p></section><section>form</section>';
+		expect(pageShortfalls('public/contact.html', thin)).toEqual([
+			'public/contact.html has 2 sections; a full page here has at least 4',
+			'public/contact.html opens without a photo; its first section needs one (an <img> or a background image)',
+		]);
+		const home = `<section class="hero"><img src="a.jpg" alt=""></section>${'<section>x</section>'.repeat(5)}`;
+		expect(pageShortfalls('public/index.html', home)).toEqual([]);
+		expect(pageShortfalls('public/index.html', home.replace('<section>x</section>', ''))).toEqual(['public/index.html has 5 sections; a full page here has at least 6']);
+		const bg = `<section class="hero" style="background-image:url(b.jpg)">x</section>${'<section>y</section>'.repeat(3)}`;
+		expect(pageShortfalls('public/about.html', bg)).toEqual([]);
+		expect(pageShortfalls('public/404.html', '<section>x</section>')).toEqual([]);
+	});
+});

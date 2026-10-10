@@ -109,7 +109,9 @@ ${JSON.stringify({
 })}
 <<<END PLAN>>>`;
 
-const page = (path: string, body: string) => `<<<FILE ${path}>>>\n${body}\n<<<END FILE>>>\n<<<REPLY>>>\n${path} is in.\n<<<END REPLY>>>`;
+// A full page (an opening photo, 6 sections) around the test's own markup: new-site pages must be full (11 Oct).
+const FULL = (body: string) => `<section><img src="h.jpg" alt=""></section>${body}${'<section>s</section>'.repeat(5)}`;
+const page = (path: string, body: string) => `<<<FILE ${path}>>>\n${FULL(body)}\n<<<END FILE>>>\n<<<REPLY>>>\n${path} is in.\n<<<END REPLY>>>`;
 
 describe('a new site: plan, then phases, pages side by side, one deploy at a time', () => {
 	it('announces every phase first, writes each phase, deploys after each, checks the browser once', async () => {
@@ -169,25 +171,6 @@ describe('a new site: plan, then phases, pages side by side, one deploy at a tim
 		const r = await runRequest(s.deps, { request: 'A 3-page site', resume: { plan: { ...plan, phases: plan.phases.map((p: { after?: number[] }) => ({ after: [], ...p })) }, done: [0] } });
 		expect(s.prompts).toHaveLength(2);
 		expect(r.failed).toEqual([]);
-	});
-});
-
-describe('the style brief, trimmed per call', () => {
-	const styled = 'Build Kristi a site.\nSTYLE TOKENS: bg #FBF6F4\nREFERENCE IMPLEMENTATION: the Blush style for another business.\n```html\n<!doctype html><p>REFERENCE-PAGE</p>\n```\nNEVER: purple.';
-	it('only the first phase (the look and the home page) gets the reference page; the plan and later pages get the rules', async () => {
-		const s = fakeSite({}, [
-			PLAN,
-			`<<<FILE public/styles.css>>>\nbody{}\n<<<END FILE>>>\n${page('public/index.html', '<nav/>')}`,
-			(p) => page(p.includes('THIS PHASE: Services') ? 'public/services.html' : 'public/about.html', '<h1>x</h1>'),
-			(p) => page(p.includes('THIS PHASE: Services') ? 'public/services.html' : 'public/about.html', '<h1>y</h1>'),
-		]);
-		await runRequest(s.deps, { request: styled });
-		expect(s.prompts[0]).not.toContain('REFERENCE-PAGE');
-		expect(s.prompts[0]).toContain('STYLE TOKENS: bg #FBF6F4');
-		expect(s.prompts[0]).toContain('NEVER: purple.');
-		expect(s.prompts[1]).toContain('REFERENCE-PAGE');
-		expect(s.prompts[2]).not.toContain('REFERENCE-PAGE');
-		expect(s.prompts[3]).not.toContain('REFERENCE-PAGE');
 	});
 });
 
@@ -253,7 +236,7 @@ describe('a retry adds to the first answer, it does not replace it', () => {
 		const s = fakeSite({}, [
 			plan,
 			'<<<FILE public/styles.css>>>\n.btn{}\n<<<END FILE>>>',
-			'<<<FILE public/index.html>>>\n<a class="btn">Book</a>\n<<<END FILE>>>',
+			`<<<FILE public/index.html>>>\n${FULL('<a class="btn">Book</a>')}\n<<<END FILE>>>`,
 		]);
 		const r = await runRequest(s.deps, { request: 'A site' });
 		expect(r.failed).toEqual([]);
@@ -335,5 +318,46 @@ describe('the look and the home page get the most care', () => {
 		};
 		await runRequest(s.deps, { request: 'A site' });
 		expect(labels).toEqual(['first', 'look', 'phase 2']);
+	});
+});
+
+describe('new-site pages are asked for again when thin', () => {
+	it('a page with too few sections or no opening photo is retried with what is missing; an edit to an existing page is not held to it', async () => {
+		const full = `<section class="hero"><img src="h.jpg" alt=""></section>${'<section>s</section>'.repeat(3)}`;
+		const plan = `<<<PLAN>>>\n${JSON.stringify({ reply: 'x', phases: [{ name: 'Your look and home page', files: ['public/styles.css', 'public/index.html'] }, { name: 'Contact', files: ['public/contact.html'], after: [0] }] })}\n<<<END PLAN>>>`;
+		const s = fakeSite({}, [
+			plan,
+			`<<<FILE public/styles.css>>>\nb{}\n<<<END FILE>>>\n<<<FILE public/index.html>>>\n<section class="hero"><img src="h.jpg" alt=""></section>${'<section>s</section>'.repeat(5)}\n<<<END FILE>>>`,
+			'<<<FILE public/contact.html>>>\n<section>thin</section>\n<<<END FILE>>>',
+			`<<<FILE public/contact.html>>>\n${full}\n<<<END FILE>>>`,
+		]);
+		const r = await runRequest(s.deps, { request: 'A site' });
+		expect(r.failed).toEqual([]);
+		expect(s.prompts[3]).toContain('at least 4');
+		expect(s.prompts[3]).toContain('opens without a photo');
+		expect(s.files['public/contact.html']).toContain('h.jpg');
+
+		const e = fakeSite({ 'public/styles.css': 'b{}', 'public/about.html': '<section>old</section>' }, ['<<<EDIT public/about.html>>>\n<<<FIND>>>\nold\n<<<REPLACE>>>\nnew\n<<<END EDIT>>>']);
+		await runRequest(e.deps, { request: 'change a word' });
+		expect(e.prompts).toHaveLength(1);
+	});
+
+	it('page phases read the style reference page too; the plan does not', async () => {
+		const styled = 'Build it.\nREFERENCE IMPLEMENTATION: the Blush style.\n```html\n<!doctype html><p>REFERENCE-PAGE</p>\n```\nNEVER: purple.';
+		const full = `<section class="hero"><img src="h.jpg" alt=""></section>${'<section>s</section>'.repeat(5)}`;
+		const plan = `<<<PLAN>>>\n${JSON.stringify({ reply: 'x', phases: [{ name: 'Your look and home page', files: ['public/styles.css', 'public/index.html'] }, { name: 'About', files: ['public/about.html'], after: [0] }] })}\n<<<END PLAN>>>`;
+		const s = fakeSite({}, [plan, `<<<FILE public/styles.css>>>\nb{}\n<<<END FILE>>>\n<<<FILE public/index.html>>>\n${full}\n<<<END FILE>>>`, `<<<FILE public/about.html>>>\n${full}\n<<<END FILE>>>`]);
+		await runRequest(s.deps, { request: styled });
+		expect(s.prompts[0]).not.toContain('REFERENCE-PAGE');
+		expect(s.prompts[1]).toContain('REFERENCE-PAGE');
+		expect(s.prompts[2]).toContain('REFERENCE-PAGE');
+	});
+
+	it('the rules ask for the photo strip, the inline booking panel, a full contact page, and one phone booking button at a time', async () => {
+		const { PHASE_SYSTEM } = await import('./prompts');
+		expect(PHASE_SYSTEM).toMatch(/photo strip/i);
+		expect(PHASE_SYSTEM).toMatch(/booking panel/i);
+		expect(PHASE_SYSTEM).toMatch(/contact page/i);
+		expect(PHASE_SYSTEM).toMatch(/never two .*book/i);
 	});
 });
