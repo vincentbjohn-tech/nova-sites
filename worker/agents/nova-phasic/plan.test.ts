@@ -107,3 +107,19 @@ describe('running the phases: in order of what they wait for, independent ones s
 		expect(ran).toEqual([1]);
 	});
 });
+
+describe('a design contract makes every phase independent', () => {
+	it('with the class list and the shared header, no phase waits for another (whatever the plan said)', () => {
+		const a = parseFirstAnswer(
+			`<<<PLAN>>>\n${JSON.stringify({
+				reply: 'x',
+				phases: [{ name: 'Your look', files: ['public/styles.css'] }, { name: 'Home', files: ['public/index.html'], after: [0] }],
+				design: { classes: '.btn the button', header: '<header>H</header>', footer: '<footer>F</footer>' },
+			})}\n<<<END PLAN>>>`,
+		);
+		if (a.kind !== 'plan') throw new Error('not a plan');
+		expect(a.plan.phases.map((p) => p.after)).toEqual([[], []]);
+		expect(a.plan.classes).toBe('.btn the button');
+		expect(a.plan.layout).toBe('<header>H</header>\n<footer>F</footer>');
+	});
+});

@@ -8,19 +8,22 @@ import { resolveNovaGatewayModel } from '../think/nova-gateway';
 import type { ChatMessage } from './runner';
 
 export const NOVA_PHASE_DEFAULT_MODEL = 'cli:claude-sonnet';
+export const NOVA_PHASE_DEFAULT_EFFORT = 'low';
 
 export class GatewayError extends Error {}
 
 export function phaseModel(env: unknown, fetcher: typeof fetch = (...a) => fetch(...a)) {
 	const gw = resolveNovaGatewayModel(env);
 	const model = ((env as { NOVA_PHASE_MODEL?: string }).NOVA_PHASE_MODEL ?? '').trim() || NOVA_PHASE_DEFAULT_MODEL;
+	// Low by default: a plan spent most of its output thinking at the CLI's default (10 Oct).
+	const effort = ((env as { NOVA_PHASE_EFFORT?: string }).NOVA_PHASE_EFFORT ?? '').trim() || NOVA_PHASE_DEFAULT_EFFORT;
 	if (!gw) return null;
 	return async (messages: ChatMessage[]): Promise<string> => {
 		const r = await fetcher(`${gw.baseURL}/chat/completions`, {
 			method: 'POST',
 			headers: { Authorization: `Bearer ${gw.apiKey}`, 'Content-Type': 'application/json' },
 			// Plain text: the gateway's CLI route then writes the page as it is, not inside a JSON string.
-			body: JSON.stringify({ model, messages, stream: false, response_format: { type: 'text' } }),
+			body: JSON.stringify({ model, messages, stream: false, response_format: { type: 'text' }, reasoning_effort: effort }),
 		});
 		if (!r.ok) throw new GatewayError(`the model gateway answered ${r.status}`);
 		const body = (await r.json()) as { choices?: { message?: { content?: unknown } }[] };

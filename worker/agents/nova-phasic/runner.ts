@@ -12,9 +12,9 @@
  * the whole flow is tested with fakes. While a model call runs, a `nova_progress` line goes out every
  * few seconds: the owner never watches a silent minute.
  */
-import { applyEdits, parsePhaseOutput, type PhaseOutput } from './format';
+import { applyEdits, parsePhaseOutput, unstyledClasses, type PhaseOutput } from './format';
 import { parseFirstAnswer, runPhases, type Plan } from './plan';
-import { FIRST_SYSTEM, FIX_SYSTEM, PHASE_SYSTEM, filesBlock } from './prompts';
+import { FIRST_SYSTEM, FIX_SYSTEM, PHASE_SYSTEM, STYLE_FIX_SYSTEM, filesBlock } from './prompts';
 
 export interface ChatMessage {
 	role: 'system' | 'user' | 'assistant';
@@ -46,6 +46,8 @@ export interface RequestInput {
 	concurrency?: number;
 	/** Carry on a plan a restart interrupted. */
 	resume?: { plan: Plan; done: number[] };
+	/** The most a workspace call (list, read, write, deploy, browser check) may take; never a model call. */
+	callTimeoutMs?: number;
 }
 
 export interface RequestResult {
@@ -75,7 +77,33 @@ export function withoutReference(request: string): string {
 	return request.replace(REFERENCE, '$1(not shown here: the look is already set in the shared stylesheet and the home page)\n');
 }
 
-export async function runRequest(deps: RunnerDeps, input: RequestInput): Promise<RequestResult> {
+/** A workspace call that never answers ends as an error (seen 10 Oct: a request waited 8 minutes). */
+function limited<T>(call: Promise<T>, ms: number, what: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const t = setTimeout(() => reject(new Problem(`${what} took longer than ${Math.round(ms / 1000)} s`)), ms);
+		call.then(
+			(v) => {
+				clearTimeout(t);
+				resolve(v);
+			},
+			(e) => {
+				clearTimeout(t);
+				reject(e);
+			},
+		);
+	});
+}
+
+export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Promise<RequestResult> {
+	const ms = input.callTimeoutMs ?? 60_000;
+	const deps: RunnerDeps = {
+		...rawDeps,
+		listFiles: () => limited(rawDeps.listFiles(), ms, 'listing the files'),
+		readFile: (path) => limited(rawDeps.readFile(path), ms, `reading ${path}`),
+		writeFile: (path, content) => limited(rawDeps.writeFile(path, content), ms, `saving ${path}`),
+		deploy: () => limited(rawDeps.deploy(), ms * 3, 'refreshing the preview'),
+		browserCheck: () => limited(rawDeps.browserCheck(), ms, 'the browser check'),
+	};
 	const active = new Set<string>();
 	let deploying = false;
 	const t0 = Date.now();
@@ -141,8 +169,10 @@ export async function runRequest(deps: RunnerDeps, input: RequestInput): Promise
 			const byPath = new Map<string, { find: string; replace: string }[]>();
 			for (const e of out.edits) byPath.set(e.path, [...(byPath.get(e.path) ?? []), e]);
 			const current: { path: string; content: string }[] = [];
+			const existing = byPath.size ? new Set((await deps.listFiles()).map((p) => p.replace(/^\/+/, ''))) : new Set<string>();
 			for (const [path, edits] of byPath) {
-				const before = writes.get(path) ?? (await deps.readFile(path).catch(() => null));
+				// Only a file that is there is read (reading one that isn't never answered, 10 Oct).
+				const before = writes.get(path) ?? (existing.has(path) ? await deps.readFile(path).catch(() => null) : null);
 				if (before === null) {
 					problems.push(`${path} doesn't exist: write it whole with a FILE block.`);
 					continue;
@@ -170,16 +200,36 @@ export async function runRequest(deps: RunnerDeps, input: RequestInput): Promise
 		after,
 	});
 
-	/** Write a phase's files all together, deploy, and say so on the socket. */
+	/** What the site has so far (a deploy before there is a styled page shows nothing worth seeing). */
+	const has = { page: false, css: false, known: false };
+	const learn = async () => {
+		if (has.known) return;
+		const paths = (await deps.listFiles()).map((p) => p.replace(/^\/+/, ''));
+		has.page = paths.some((p) => /^public\/.+\.html?$/.test(p));
+		has.css = paths.includes('public/styles.css') || !paths.some((p) => p.startsWith('public/'));
+		has.known = true;
+	};
+	let skipped = false;
+
+	/** Write a phase's files all together, deploy (once there is a styled page to show), say so on the socket. */
 	const commitPhase = async (name: string, writes: Map<string, string>, index: number, count: number) => {
+		await learn();
 		for (const [path, content] of writes) {
 			await deps.writeFile(path, content);
 			deps.emit('file_generated', { message: `Updated ${path}`, file: { filePath: path, filePurpose: name }, phaseIndex: index });
+			if (/^public\/.+\.html?$/.test(path)) has.page = true;
+			if (path === 'public/styles.css') has.css = true;
 		}
-		await deploy();
+		// A new site's pages and look are written side by side: no preview of a page without its look,
+		// and none of a look without a page. A deploy held back goes out with the next one (or at the end).
+		if (has.page && (has.css || !needsCss)) {
+			skipped = false;
+			await deploy();
+		} else if (writes.size) skipped = true;
 		deps.emit('phase_implemented', { message: name, phase: phaseInfo(name, [...writes.keys()], index, count) });
 	};
 
+	let needsCss = false;
 	const failed: RequestResult['failed'] = [];
 	const replies: string[] = [];
 	let changed = false;
@@ -233,6 +283,7 @@ export async function runRequest(deps: RunnerDeps, input: RequestInput): Promise
 			if (p.reply && !input.resume) deps.emit('conversation_response', { message: p.reply, isStreaming: false });
 			p.phases.forEach((ph, i) => deps.emit('phase_generated', { message: ph.name, phase: phaseInfo(ph.name, ph.files, i, p.phases.length, ph.after) }));
 			const planText = JSON.stringify({ title: p.title, phases: p.phases }, null, 1);
+			needsCss = p.phases.some((ph) => ph.files.includes('public/styles.css'));
 			const shared = ['public/styles.css', 'public/index.html'];
 			const result = await runPhases(
 				p,
@@ -247,7 +298,7 @@ export async function runRequest(deps: RunnerDeps, input: RequestInput): Promise
 						const base = p.layout ? ['public/styles.css'] : shared;
 						const seen = site.filter((f) => base.includes(f.path) || ph.files.includes(f.path));
 						const others = site.filter((f) => !seen.includes(f)).map((f) => f.path);
-						const prompt = `THE OWNER'S REQUEST:\n${ph.after.length ? withoutReference(input.request) : input.request}${history}\n\nTHE PLAN:\n${planText}\n\nTHIS PHASE: ${ph.name} (phase ${i + 1} of ${p.phases.length}; files: ${ph.files.join(', ') || 'as needed'})\n\n${p.layout ? `THE SHARED HEADER AND FOOTER (every page uses exactly this markup; mark the current page in the menu):\n${p.layout}\n\n` : ''}THE FILES IT BUILDS ON:\n${filesBlock(seen)}${others.length ? `\n\nOTHER FILES (not shown): ${others.join(', ')}` : ''}`;
+						const prompt = `THE OWNER'S REQUEST:\n${ph.after.length ? withoutReference(input.request) : input.request}${history}\n\nTHE PLAN:\n${planText}\n\nTHIS PHASE: ${ph.name} (phase ${i + 1} of ${p.phases.length}; files: ${ph.files.join(', ') || 'as needed'})\n\n${p.classes ? `THE CLASSES (the only ones pages use; the stylesheet styles every one):\n${p.classes}\n\n` : ''}${p.layout ? `THE SHARED HEADER AND FOOTER (every page uses exactly this markup; mark the current page in the menu):\n${p.layout}\n\n` : ''}THE FILES IT BUILDS ON:\n${filesBlock(seen)}${others.length ? `\n\nOTHER FILES (not shown): ${others.join(', ')}` : ''}`;
 						const msgs: ChatMessage[] = [{ role: 'system', content: PHASE_SYSTEM }, { role: 'user', content: prompt }];
 						const answer = await deps.model(msgs, { label: `phase ${i + 1}` });
 						const done = await resolve(
@@ -279,6 +330,37 @@ export async function runRequest(deps: RunnerDeps, input: RequestInput): Promise
 			);
 			for (const f of result.failed) failed.push({ phase: p.phases[f.index].name, error: f.error });
 			for (const s of result.skipped) failed.push({ phase: p.phases[s].name, error: 'skipped: a phase it waits for failed' });
+		}
+
+		// Pages and the look written side by side: every class a page uses gets a rule (one short pass).
+		if (changed) {
+			const site = await readSite().catch(() => [] as { path: string; content: string }[]);
+			const css = site.find((f) => f.path === 'public/styles.css');
+			const missing = css ? unstyledClasses(site.filter((f) => /\.html?$/.test(f.path)), css.content) : [];
+			if (missing.length) {
+				const STYLE_PHASE = 'Finishing the look';
+				deps.emit('phase_generated', { message: STYLE_PHASE, phase: phaseInfo(STYLE_PHASE, ['public/styles.css'], 98, 1) });
+				deps.emit('phase_implementing', { message: STYLE_PHASE, phase: phaseInfo(STYLE_PHASE, ['public/styles.css'], 98, 1) });
+				active.add(STYLE_PHASE.toLowerCase());
+				try {
+					const answer = await deps.model(
+						[
+							{ role: 'system', content: STYLE_FIX_SYSTEM },
+							{ role: 'user', content: `THE CLASSES WITH NO RULES:\n${missing.slice(0, 60).map((c) => `.${c}`).join('\n')}\n\nWHERE THEY ARE USED:\n${filesBlock(site.filter((f) => /\.html?$/.test(f.path)), 40_000)}\n\nTHE STYLESHEET:\n${filesBlock([css!], 40_000)}` },
+						],
+						{ label: 'style pass' },
+					);
+					const done = await resolve(parsePhaseOutput(answer), async () => {
+						throw new Problem('the style pass could not be applied');
+					});
+					await commitPhase(STYLE_PHASE, done.writes, 98, 1);
+				} catch (e) {
+					failed.push({ phase: FIX_PHASE, error: e instanceof Error ? e.message : String(e) });
+				} finally {
+					active.delete(STYLE_PHASE.toLowerCase());
+				}
+			}
+			if (skipped) await deploy();
 		}
 
 		if (changed && input.browserCheck) {

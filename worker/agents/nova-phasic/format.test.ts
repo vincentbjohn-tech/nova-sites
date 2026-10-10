@@ -105,3 +105,25 @@ describe('the shared header and footer (the look phase hands them to every page)
 		expect(out.files.map((f) => f.path)).toEqual(['public/styles.css']);
 	});
 });
+
+describe('APPEND: rules added at the end of a file (no anchor to find)', () => {
+	it('reads an APPEND block as an edit that adds to the end', () => {
+		const out = parsePhaseOutput('<<<APPEND public/styles.css>>>\n.price{color:red}\n<<<END APPEND>>>');
+		expect(out.edits).toEqual([{ path: 'public/styles.css', find: '', replace: '.price{color:red}' }]);
+	});
+	it('applies it after the file, on its own line', () => {
+		expect(applyEdits('body{}', [{ find: '', replace: '.a{}' }])).toEqual({ content: 'body{}\n.a{}\n', missed: [] });
+	});
+});
+
+describe('classes a page uses that the stylesheet never styles', () => {
+	it('lists them, ignoring ones the page styles itself and the usual state classes', async () => {
+		const { unstyledClasses } = await import('./format');
+		const pages = [
+			{ path: 'public/index.html', content: '<div class="hero hero--big is-open"><p class="price lede">x</p><style>.lede{}</style></div>' },
+			{ path: 'public/about.html', content: '<section class="card  story">y</section>' },
+		];
+		const css = '.hero{} .hero--big:hover{} .card,.x{} @media (min-width:600px){.price{}}';
+		expect(unstyledClasses(pages, css)).toEqual(['story']);
+	});
+});

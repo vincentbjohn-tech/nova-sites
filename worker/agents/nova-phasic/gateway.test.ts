@@ -11,7 +11,7 @@ describe('the phased builder model: one plain completion through the gateway', (
 			return new Response(JSON.stringify({ choices: [{ message: { content: 'hi' } }] }));
 		});
 		expect(await model!([{ role: 'user', content: 'x' }])).toBe('hi');
-		expect(seen).toEqual({ url: 'https://gw.example/v1/chat/completions', body: { model: 'cli:claude-sonnet', messages: [{ role: 'user', content: 'x' }], stream: false, response_format: { type: 'text' } }, auth: 'Bearer k' });
+		expect(seen).toEqual({ url: 'https://gw.example/v1/chat/completions', body: { model: 'cli:claude-sonnet', messages: [{ role: 'user', content: 'x' }], stream: false, response_format: { type: 'text' }, reasoning_effort: 'low' }, auth: 'Bearer k' });
 	});
 
 	it('NOVA_PHASE_MODEL picks the model; no gateway configured → null', () => {

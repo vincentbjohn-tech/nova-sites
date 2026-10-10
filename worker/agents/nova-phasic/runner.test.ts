@@ -230,3 +230,96 @@ describe('a phase that writes nothing is never "done"', () => {
 		expect(t.events.filter((e) => e.type === 'phase_implemented')).toEqual([]);
 	});
 });
+
+describe('a new site: the design contract in the plan, so the look and every page are written side by side', () => {
+	const contract = `<<<PLAN>>>\n${JSON.stringify({
+		reply: 'Building.',
+		phases: [
+			{ name: 'Your look', files: ['public/styles.css'] },
+			{ name: 'Home page', files: ['public/index.html'] },
+			{ name: 'Services', files: ['public/services.html'] },
+		],
+		design: { classes: '.btn primary button; .card a boxed item', header: '<header class="nav">MENU</header>', footer: '<footer>F</footer>' },
+	})}\n<<<END PLAN>>>`;
+
+	it('every phase starts at once, each sees the class list and the shared header and footer', async () => {
+		const started: number[] = [];
+		const s = fakeSite({}, [
+			contract,
+			(p) => (p.includes('THIS PHASE: Your look') ? '<<<FILE public/styles.css>>>\n.nav{} .btn{} .card{}\n<<<END FILE>>>' : page(p.includes('THIS PHASE: Home') ? 'public/index.html' : 'public/services.html', '<header class="nav">MENU</header><a class="btn">x</a>')),
+			(p) => (p.includes('THIS PHASE: Your look') ? '<<<FILE public/styles.css>>>\n.nav{} .btn{} .card{}\n<<<END FILE>>>' : page(p.includes('THIS PHASE: Home') ? 'public/index.html' : 'public/services.html', '<header class="nav">MENU</header><a class="btn">x</a>')),
+			(p) => (p.includes('THIS PHASE: Your look') ? '<<<FILE public/styles.css>>>\n.nav{} .btn{} .card{}\n<<<END FILE>>>' : page(p.includes('THIS PHASE: Home') ? 'public/index.html' : 'public/services.html', '<header class="nav">MENU</header><a class="btn">x</a>')),
+		], { slowMs: 20 });
+		s.deps.emit = ((orig) => (type: string, data: Record<string, unknown>) => {
+			if (type === 'phase_implementing') started.push(Date.now());
+			orig(type, data);
+		})(s.deps.emit);
+		const r = await runRequest(s.deps, { request: 'A site' });
+		expect(r.failed).toEqual([]);
+		expect(Math.max(...started) - Math.min(...started)).toBeLessThan(15);
+		for (const p of s.prompts.slice(1)) {
+			expect(p).toContain('.btn primary button');
+			expect(p).toContain('<header class="nav">MENU</header>');
+		}
+	});
+
+	it('no deploy before there is a styled page to show (no unstyled flash, no empty preview)', async () => {
+		let deployedWith: string[][] = [];
+		const s = fakeSite({}, [
+			contract,
+			(p) => (p.includes('THIS PHASE: Your look') ? '<<<FILE public/styles.css>>>\n.nav{} .btn{} .card{}\n<<<END FILE>>>' : page(p.includes('THIS PHASE: Home') ? 'public/index.html' : 'public/services.html', '<a class="btn">x</a>')),
+			(p) => (p.includes('THIS PHASE: Your look') ? '<<<FILE public/styles.css>>>\n.nav{} .btn{} .card{}\n<<<END FILE>>>' : page(p.includes('THIS PHASE: Home') ? 'public/index.html' : 'public/services.html', '<a class="btn">x</a>')),
+			(p) => (p.includes('THIS PHASE: Your look') ? '<<<FILE public/styles.css>>>\n.nav{} .btn{} .card{}\n<<<END FILE>>>' : page(p.includes('THIS PHASE: Home') ? 'public/index.html' : 'public/services.html', '<a class="btn">x</a>')),
+		]);
+		const deploy = s.deps.deploy;
+		s.deps.deploy = async () => {
+			deployedWith = [...deployedWith, Object.keys(s.files).sort()];
+			return deploy();
+		};
+		await runRequest(s.deps, { request: 'A site' });
+		for (const files of deployedWith) {
+			expect(files).toContain('public/styles.css');
+			expect(files.some((f) => f.endsWith('.html'))).toBe(true);
+		}
+		expect(deployedWith.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it('classes the pages use that the stylesheet never styles get one short pass that adds them', async () => {
+		const s = fakeSite({ 'public/styles.css': '.nav{}', 'public/index.html': '<header class="nav"></header>' }, [
+			'<<<EDIT public/index.html>>>\n<<<FIND>>>\n<header class="nav"></header>\n<<<REPLACE>>>\n<header class="nav"></header><ul class="price-list"></ul>\n<<<END EDIT>>>',
+			'<<<APPEND public/styles.css>>>\n.price-list{display:grid}\n<<<END APPEND>>>',
+		]);
+		await runRequest(s.deps, { request: 'Add a price list' });
+		expect(s.prompts[1]).toContain('price-list');
+		expect(s.files['public/styles.css']).toContain('.price-list{display:grid}');
+	});
+});
+
+describe('her words never call the preview live', () => {
+	it('the rules every call reads say the preview is not live', async () => {
+		const { FIRST_SYSTEM, PHASE_SYSTEM } = await import('./prompts');
+		for (const p of [FIRST_SYSTEM, PHASE_SYSTEM]) expect(p).toMatch(/never say .*live/i);
+	});
+});
+
+describe('a workspace call that never answers never hangs the request', () => {
+	it('an edit aimed at a page that does not exist yet is never read: it is asked for whole', async () => {
+		const s = fakeSite({ 'public/index.html': '<nav>Home</nav>' }, [
+			'<<<EDIT public/gallery.html>>>\n<<<FIND>>>\n<h1>x</h1>\n<<<REPLACE>>>\n<h1>y</h1>\n<<<END EDIT>>>',
+			'<<<FILE public/gallery.html>>>\n<h1>Gallery</h1>\n<<<END FILE>>>',
+		]);
+		const read = s.deps.readFile;
+		// The workspace's read of a file that isn't there never answers (as seen live).
+		s.deps.readFile = (path) => (path in s.files ? read(path) : new Promise(() => undefined));
+		const r = await runRequest(s.deps, { request: 'Add a gallery page' });
+		expect(r.failed).toEqual([]);
+		expect(s.files['public/gallery.html']).toContain('Gallery');
+	});
+
+	it('a stuck write or deploy ends the phase as not finished, and the request still ends', async () => {
+		const s = fakeSite({ 'public/index.html': '<h1>Old</h1>' }, ['<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Old</h1>\n<<<REPLACE>>>\n<h1>New</h1>\n<<<END EDIT>>>']);
+		s.deps.writeFile = () => new Promise(() => undefined);
+		const r = await runRequest(s.deps, { request: 'Headline', callTimeoutMs: 30 });
+		expect(r.failed.map((f) => f.phase)).toEqual(['Your change']);
+	});
+});

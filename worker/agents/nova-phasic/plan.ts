@@ -26,6 +26,9 @@ export interface Plan {
 	phases: Phase[];
 	/** The shared header and footer, once the look phase has written them (kept for a restart). */
 	layout?: string;
+	/** A new site's design contract, written with the plan: the class names every page uses (each with
+	 *  what it is), so the stylesheet and all pages are written side by side. */
+	classes?: string;
 }
 
 export type FirstAnswer = { kind: 'plan'; plan: Plan } | { kind: 'direct'; output: PhaseOutput } | { kind: 'answer'; reply: string };
@@ -51,10 +54,19 @@ function cleanPlan(raw: unknown): Plan {
 				after: [...new Set((Array.isArray(p.after) ? p.after : []).filter((n): n is number => Number.isInteger(n) && n >= 0 && n < i))],
 			};
 		});
+	const design = (o.design && typeof o.design === 'object' ? o.design : {}) as Record<string, unknown>;
+	const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+	const header = str(design.header, 6000);
+	const footer = str(design.footer, 6000);
+	const classes = str(design.classes, 6000);
 	return {
+		...(header || footer ? { layout: [header, footer].filter(Boolean).join('\n') } : {}),
+		...(classes ? { classes } : {}),
 		reply: typeof o.reply === 'string' ? o.reply.trim() : '',
 		...(typeof o.title === 'string' && o.title.trim() ? { title: o.title.trim().slice(0, 60) } : {}),
-		phases: phases.length ? phases : [FALLBACK],
+		// With the contract in hand nothing waits: the look and every page are written side by side
+		// (the model tends to keep pages waiting for the look out of habit; seen 10 Oct).
+		phases: phases.length ? (classes && (header || footer) ? phases.map((p) => ({ ...p, after: [] })) : phases) : [FALLBACK],
 	};
 }
 

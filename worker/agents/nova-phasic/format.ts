@@ -61,7 +61,7 @@ function body(raw: string, keepTrailingNewline: boolean): string {
 	return text;
 }
 
-const OPEN = /<<<(FILE|EDIT) ([^>\n]+)>>>\n?/g;
+const OPEN = /<<<(FILE|EDIT|APPEND) ([^>\n]+)>>>\n?/g;
 
 export function parsePhaseOutput(text: string): PhaseOutput {
 	const out: PhaseOutput = { files: [], edits: [], dropped: [], unterminated: [] };
@@ -76,10 +76,10 @@ export function parsePhaseOutput(text: string): PhaseOutput {
 		const kind = m[1];
 		const path = normalPath(m[2]);
 		const start = m.index + m[0].length;
-		const endMarker = kind === 'FILE' ? '<<<END FILE>>>' : '<<<END EDIT>>>';
+		const endMarker = kind === 'FILE' ? '<<<END FILE>>>' : kind === 'APPEND' ? '<<<END APPEND>>>' : '<<<END EDIT>>>';
 		const end = text.indexOf(endMarker, start);
 		// Another block opening before this one ends: this one was cut off.
-		const nextOpen = text.slice(start).search(/<<<(?:FILE|EDIT) [^>\n]+>>>/);
+		const nextOpen = text.slice(start).search(/<<<(?:FILE|EDIT|APPEND) [^>\n]+>>>/);
 		if (end < 0 || (nextOpen >= 0 && start + nextOpen < end)) {
 			out.unterminated.push(path);
 			continue;
@@ -92,6 +92,11 @@ export function parsePhaseOutput(text: string): PhaseOutput {
 		const inner = text.slice(start, end);
 		if (kind === 'FILE') {
 			out.files.push({ path, content: body(inner, true) });
+			continue;
+		}
+		if (kind === 'APPEND') {
+			const added = body(inner, false);
+			if (added.trim()) out.edits.push({ path, find: '', replace: added });
 			continue;
 		}
 		for (const pair of inner.split('<<<FIND>>>').slice(1)) {
@@ -128,6 +133,11 @@ export function applyEdits(content: string, edits: { find: string; replace: stri
 	let text = content;
 	const missed: { find: string; replace: string }[] = [];
 	for (const e of edits) {
+		// An APPEND: added after the file, on its own line.
+		if (e.find === '') {
+			text = `${text.replace(/\n*$/, '')}\n${e.replace.replace(/\n*$/, '')}\n`;
+			continue;
+		}
 		const first = text.indexOf(e.find);
 		if (first >= 0) {
 			if (text.indexOf(e.find, first + 1) >= 0) {
@@ -146,4 +156,26 @@ export function applyEdits(content: string, edits: { find: string; replace: stri
 		text = text.slice(0, a) + e.replace + text.slice(b);
 	}
 	return { content: text, missed };
+}
+
+const STATE_CLASS = /^(?:is|has|js)-|^(?:active|open|current|visible|hidden|selected|disabled|sr-only)$/;
+
+/**
+ * Classes the pages use that no stylesheet rule mentions (the shared stylesheet, or the page's own
+ * <style>), ignoring state classes scripts toggle. Pages and the look are written side by side from the
+ * plan's class list; this is the check that they met, and the input of one short pass that adds rules.
+ */
+export function unstyledClasses(pages: { path: string; content: string }[], css: string): string[] {
+	const styled = (sheet: string) => new Set([...sheet.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((m) => m[1]));
+	const shared = styled(css);
+	const missing = new Set<string>();
+	for (const page of pages) {
+		const own = styled([...page.content.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n'));
+		for (const m of page.content.matchAll(/\sclass="([^"]*)"/g)) {
+			for (const c of m[1].split(/\s+/)) {
+				if (c && !shared.has(c) && !own.has(c) && !STATE_CLASS.test(c)) missing.add(c);
+			}
+		}
+	}
+	return [...missing].sort();
 }
