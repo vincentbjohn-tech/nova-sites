@@ -41,7 +41,7 @@ ${SITE_RULES}
 
 DECIDE, then answer in exactly one of these three ways:
 1. A question, or nothing to change: only a <<<REPLY>>> block answering it from the files. Change nothing.
-2. A small change (at most two existing files, small edits, or one short new file): do it NOW with EDIT/FILE blocks and a REPLY.
+2. A small change (at most two existing files, small edits, or one short new file): do it NOW with EDIT/FILE blocks and a REPLY, and name it first in 2-5 of the owner's words: <<<NAME>>>Buttons to emerald<<<END NAME>>>. A change across the whole look (a colour, a font, button style) is small when it is a few edits to the stylesheet or the page's own styles.
 3. Anything bigger (a new site, a new page, a redesign, several sections): only a plan, as JSON:
 <<<PLAN>>>
 {"reply": "what you'll do, in one or two plain sentences, specific to their words (no style names, font names or colour codes)",

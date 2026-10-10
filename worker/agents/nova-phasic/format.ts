@@ -39,6 +39,8 @@ export interface PhaseOutput {
 	reply?: string;
 	/** The shared header and footer markup every page copies (the look phase gives it; never a file). */
 	layout?: string;
+	/** A small change's name in the owner's words ("Buttons to emerald"), for the timeline. */
+	name?: string;
 	/** Paths the answer tried to write outside `public/` (dropped). */
 	dropped: string[];
 	/** Paths whose block never ended (not written). */
@@ -68,6 +70,8 @@ export function parsePhaseOutput(text: string): PhaseOutput {
 	const out: PhaseOutput = { files: [], edits: [], dropped: [], unterminated: [] };
 	const reply = /<<<REPLY>>>\n?([\s\S]*?)<<<END REPLY>>>/.exec(text);
 	if (reply) out.reply = reply[1].trim() || undefined;
+	const name = /<<<NAME>>>\n?([\s\S]*?)<<<END NAME>>>/.exec(text);
+	if (name) out.name = name[1].trim().slice(0, 60) || undefined;
 	const layout = /<<<LAYOUT>>>\n?([\s\S]*?)<<<END LAYOUT>>>/.exec(text);
 	if (layout) out.layout = layout[1].trim() || undefined;
 

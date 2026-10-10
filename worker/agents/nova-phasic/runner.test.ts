@@ -213,7 +213,8 @@ describe('a workspace call that never answers never hangs the request', () => {
 		const s = fakeSite({ 'public/index.html': '<h1>Old</h1>' }, ['<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Old</h1>\n<<<REPLACE>>>\n<h1>New</h1>\n<<<END EDIT>>>']);
 		s.deps.writeFile = () => new Promise(() => undefined);
 		const r = await runRequest(s.deps, { request: 'Headline', callTimeoutMs: 30 });
-		expect(r.failed.map((f) => f.phase)).toEqual(['Your change']);
+		// Named in her own words (never "Your change", 11 Oct).
+		expect(r.failed.map((f) => f.phase)).toEqual(['Headline']);
 	});
 });
 
@@ -400,5 +401,42 @@ describe('speed: a new page and a small edit', () => {
 	it('the closing band carries hours, a short price list and the button', async () => {
 		const { PHASE_SYSTEM } = await import('./prompts');
 		expect(PHASE_SYSTEM).toMatch(/closing call-to-action band with the hours, a short price list and the booking button/i);
+	});
+});
+
+describe('the placeholder and marker checks only judge what this request adds (Vincent, 11 Oct)', () => {
+	it('an edit to a page that already shows [[…]] text goes through (an older site), as long as it adds none', async () => {
+		const s = fakeSite({ 'public/index.html': '<p>[[PLACEHOLDER: phone]]</p><a class="btn" style="background:#f5c518">Book</a>' }, [
+			'<<<EDIT public/index.html>>>\n<<<FIND>>>\nbackground:#f5c518\n<<<REPLACE>>>\nbackground:#10b981;box-shadow:0 0 18px #10b98199\n<<<END EDIT>>>\n<<<REPLY>>>\nThe buttons are emerald with a soft glow now.\n<<<END REPLY>>>',
+		]);
+		const r = await runRequest(s.deps, { request: 'emerald glowing buttons instead of yellow' });
+		expect(r.failed).toEqual([]);
+		expect(s.files['public/index.html']).toContain('#10b981');
+	});
+	it('an edit that adds a new [[…]] is still sent back', async () => {
+		const s = fakeSite({ 'public/index.html': '<p>[[PLACEHOLDER: phone]]</p><h1>Hi</h1>' }, [
+			'<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Hi</h1>\n<<<REPLACE>>>\n<h1>Hi</h1><p>[[PLACEHOLDER: address]]</p>\n<<<END EDIT>>>',
+			'<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Hi</h1>\n<<<REPLACE>>>\n<h1>Hello</h1>\n<<<END EDIT>>>',
+		]);
+		await runRequest(s.deps, { request: 'headline' });
+		expect(s.prompts[1]).toContain('[[');
+		expect(s.files['public/index.html']).toBe('<p>[[PLACEHOLDER: phone]]</p><h1>Hello</h1>');
+	});
+});
+
+describe('a small change is named in the owner\'s words, never "Your change"', () => {
+	it('uses the NAME the answer gives; without one, the start of her request', async () => {
+		const s = fakeSite({ 'public/index.html': '<a style="background:#f5c518">Book</a>' }, [
+			'<<<NAME>>>\nButtons to emerald\n<<<END NAME>>>\n<<<EDIT public/index.html>>>\n<<<FIND>>>\nbackground:#f5c518\n<<<REPLACE>>>\nbackground:#10b981\n<<<END EDIT>>>',
+		]);
+		await runRequest(s.deps, { request: 'can you make the buttons emerald glowing color instead of yellow' });
+		const names = s.events.filter((e) => e.type === 'phase_generated').map((e) => (e.data.phase as { name: string }).name);
+		expect(names).toEqual(['Buttons to emerald']);
+
+		const t = fakeSite({ 'public/index.html': '<h1>Old</h1>' }, ['<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Old</h1>\n<<<REPLACE>>>\n<h1>New</h1>\n<<<END EDIT>>>']);
+		await runRequest(t.deps, { request: 'can you change the headline to New please, and keep everything else' });
+		const n2 = t.events.filter((e) => e.type === 'phase_generated').map((e) => (e.data.phase as { name: string }).name);
+		expect(n2[0]).toBe('Change the headline to New please…');
+		expect(n2[0]).not.toBe('Your change');
 	});
 });
