@@ -32,6 +32,8 @@ export const EDIT_ROWS: Record<string, string> = {
 	text: 'Change the main headline to "Hair that feels like you, only better." Change nothing else.',
 	layout: 'Show the services in two columns side by side instead of one list. Change nothing else.',
 	section: 'Add a section with three short client testimonials right below the services.',
+	// A section that needs no facts the owner hasn't given (testimonials can't be invented).
+	section2: 'Add a short section right below the services explaining how a first appointment works, in three steps.',
 	page: 'Add a Gallery page with six photos of hair work, and link it from the menu.',
 	question: 'What pages does my site have right now? Just tell me, don\'t change anything.',
 };
@@ -105,8 +107,8 @@ if (flags['build-started-at']) {
 }
 for (const row of rows) {
 	const r = await timeTurn(row, Date.now(), () => post(EDIT_ROWS[row]), 20 * 60_000, row === 'question');
-	if (row === 'question') r.reply = r.reply?.slice(0, 400);
-	else delete r.reply;
+	// Her last words for every row: the report shows that every message got an answer.
+	r.reply = r.reply?.slice(0, 400);
 	results.push(r);
 	console.log(JSON.stringify(r));
 	// Let the agent settle (the commit and label after a turn) before the next request.
