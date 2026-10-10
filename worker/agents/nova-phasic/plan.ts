@@ -99,7 +99,9 @@ export function parseFirstAnswer(text: string): FirstAnswer {
 		}
 	}
 	const out = parsePhaseOutput(text);
-	if (out.files.length || out.edits.length || out.unterminated.length) return { kind: 'direct', output: out };
+	// Any block at all means a change was meant: never "words only" (11 Oct: an answer whose edits were
+	// written slightly wrong was taken as words, and her reply claimed a change that wasn't made).
+	if (out.files.length || out.edits.length || out.unterminated.length || out.malformed.length) return { kind: 'direct', output: out };
 	return { kind: 'answer', reply: out.reply ?? text.trim() };
 }
 

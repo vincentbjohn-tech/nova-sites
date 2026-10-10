@@ -192,3 +192,15 @@ describe('a new page gets into every menu by code (the model writes only the new
 		expect(addMenuLink('<p>no menu</p>', 'public/gallery.html', 'Gallery')).toBe('<p>no menu</p>');
 	});
 });
+
+describe('Vincent\'s emerald request, 11 Oct: blocks a model writes slightly wrong still count, or fail loudly', () => {
+	it('an EDIT without the <<<FIND>>> line: the text before <<<REPLACE>>> is what it finds', () => {
+		const out = parsePhaseOutput('<<<EDIT public/index.html>>>\n  --primary:#D4AF37;\n<<<REPLACE>>>\n  --primary:#2ECC8F;\n<<<END EDIT>>>');
+		expect(out.edits).toEqual([{ path: 'public/index.html', find: '  --primary:#D4AF37;', replace: '  --primary:#2ECC8F;' }]);
+	});
+	it('an answer with block markers that yield nothing usable is marked malformed (never taken as just words)', () => {
+		const out = parsePhaseOutput('<<<EDIT public/index.html>>>\nsomething without replace\n<<<END EDIT>>>\n<<<REPLY>>>\nDone, the buttons are green.\n<<<END REPLY>>>');
+		expect(out.edits).toEqual([]);
+		expect(out.malformed).toEqual(['public/index.html']);
+	});
+});
