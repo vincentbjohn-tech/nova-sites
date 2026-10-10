@@ -201,6 +201,13 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 				}
 				writes.set(path, r.content);
 			}
+			// Never in a page: a builder marker (a slip that showed as ">>" in a nav, 10 Oct) or placeholder
+			// text an owner's visitors would read ("[[PLACEHOLDER: phone]]").
+			for (const [path, content] of writes) {
+				if (/<<<|>>>/.test(content)) problems.push(`A builder marker (<<< or >>>) is inside ${path}: write that file again without it.`);
+				if (/\.html?$/.test(path) && /\[\[[^\]]*\]\]/.test(content))
+					problems.push(`${path} shows placeholder text like [[…]]: leave the missing fact out instead (never show placeholder text).`);
+			}
 			if (!problems.length) return { writes, reply: out.reply, layout: out.layout };
 			deps.log?.(attempt >= 1 ? 'nova_phase_failed' : 'nova_phase_retry', { problems: problems.join('\n').slice(0, 2000) });
 			if (attempt >= 1) throw new Problem(problems.join('\n'));
@@ -323,20 +330,20 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 					active.add(ph.name);
 					try {
 						const site = await readSite();
-						// With the look phase's header and footer in hand, a page needs the stylesheet, not the home page.
-						const base = p.layout ? ['public/styles.css'] : shared;
-						const seen = site.filter((f) => base.includes(f.path) || ph.files.includes(f.path));
+						// Every page reads the real stylesheet AND the home page it was written with (Vincent, 10 Oct).
+						const seen = site.filter((f) => shared.includes(f.path) || ph.files.includes(f.path));
 						const others = site.filter((f) => !seen.includes(f)).map((f) => f.path);
 						const prompt = `THE OWNER'S REQUEST:\n${ph.after.length ? withoutReference(input.request) : input.request}${history}\n\nTHE PLAN:\n${planText}\n\nTHIS PHASE: ${ph.name} (phase ${i + 1} of ${p.phases.length}; files: ${ph.files.join(', ') || 'as needed'})\n\n${p.classes ? `THE CLASSES (the only ones pages use; the stylesheet styles every one):\n${p.classes}\n\n` : ''}${p.layout ? `THE SHARED HEADER AND FOOTER (every page uses exactly this markup; mark the current page in the menu):\n${p.layout}\n\n` : ''}THE FILES IT BUILDS ON:\n${filesBlock(seen)}${others.length ? `\n\nOTHER FILES (not shown): ${others.join(', ')}` : ''}`;
 						const msgs: ChatMessage[] = [{ role: 'system', content: PHASE_SYSTEM }, { role: 'user', content: prompt }];
-						const answer = await deps.model(msgs, { label: `phase ${i + 1}` });
+						const label = ph.files.includes('public/styles.css') ? 'look' : `phase ${i + 1}`;
+						const answer = await deps.model(msgs, { label });
 						const done = await resolve(
 							parsePhaseOutput(answer),
 							async (problems, current) =>
 								parsePhaseOutput(
 									await deps.model(
 										[...msgs, { role: 'assistant', content: answer }, { role: 'user', content: `Some of that couldn't be applied:\n${problems}\n\nTHE FILES AS THEY ARE NOW:\n${current || '(as above)'}\n\nAnswer again with the corrected or missing blocks only (and the REPLY). Write the blocks in your answer; you have no tools.` }],
-										{ label: `phase ${i + 1} retry` },
+										{ label: `${label} retry` },
 									),
 								),
 							ph.files,

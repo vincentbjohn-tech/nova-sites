@@ -58,3 +58,27 @@ describe('effort per call: the plan quick, the pages with more care', () => {
 		expect(seen).toEqual(['low', 'medium', 'medium', 'high']);
 	});
 });
+
+describe('the look runs at its own effort', () => {
+	it('label "look" → NOVA_LOOK_EFFORT (high by default)', async () => {
+		const seen: unknown[] = [];
+		const model = phaseModel(env, async (_u, init) => {
+			seen.push(JSON.parse(String(init?.body)).reasoning_effort);
+			return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+		})!;
+		await model([], { label: 'look' });
+		await model([], { label: 'look retry' });
+		expect(seen).toEqual(['high', 'high']);
+	});
+});
+
+describe('the switch per account (try it on a test account while everyone else stays on the old agent)', () => {
+	it('NOVA_PHASIC=on is everyone; NOVA_PHASIC_USERS lists builder user ids that get it; otherwise off', async () => {
+		const { phasicOn } = await import('./gateway');
+		expect(phasicOn({ NOVA_PHASIC: 'on' }, 'anyone')).toBe(true);
+		expect(phasicOn({ NOVA_PHASIC_USERS: 'u-test, u-2' }, 'u-test')).toBe(true);
+		expect(phasicOn({ NOVA_PHASIC_USERS: 'u-test, u-2' }, 'u-vincent')).toBe(false);
+		expect(phasicOn({}, 'u-test')).toBe(false);
+		expect(phasicOn({ NOVA_PHASIC_USERS: '' }, '')).toBe(false);
+	});
+});

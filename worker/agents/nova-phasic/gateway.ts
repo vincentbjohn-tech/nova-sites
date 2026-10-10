@@ -10,6 +10,7 @@ import type { ChatMessage } from './runner';
 export const NOVA_PHASE_DEFAULT_MODEL = 'cli:claude-sonnet';
 export const NOVA_PLAN_DEFAULT_EFFORT = 'low';
 export const NOVA_PHASE_DEFAULT_EFFORT = 'medium';
+export const NOVA_LOOK_DEFAULT_EFFORT = 'high';
 
 export class GatewayError extends Error {}
 
@@ -21,9 +22,11 @@ export function phaseModel(env: unknown, fetcher: typeof fetch = (...a) => fetch
 	const e = env as { NOVA_PLAN_EFFORT?: string; NOVA_PHASE_EFFORT?: string };
 	const planEffort = (e.NOVA_PLAN_EFFORT ?? '').trim() || NOVA_PLAN_DEFAULT_EFFORT;
 	const phaseEffort = (e.NOVA_PHASE_EFFORT ?? '').trim() || NOVA_PHASE_DEFAULT_EFFORT;
+	// The look and the home page set the whole site's quality: the most care (Vincent, 10 Oct).
+	const lookEffort = ((env as { NOVA_LOOK_EFFORT?: string }).NOVA_LOOK_EFFORT ?? '').trim() || NOVA_LOOK_DEFAULT_EFFORT;
 	if (!gw) return null;
 	return async (messages: ChatMessage[], opts?: { label?: string }): Promise<string> => {
-		const effort = opts?.label === 'first' ? planEffort : phaseEffort;
+		const effort = opts?.label === 'first' ? planEffort : opts?.label?.startsWith('look') ? lookEffort : phaseEffort;
 		const r = await fetcher(`${gw.baseURL}/chat/completions`, {
 			method: 'POST',
 			headers: { Authorization: `Bearer ${gw.apiKey}`, 'Content-Type': 'application/json' },
@@ -38,9 +41,13 @@ export function phaseModel(env: unknown, fetcher: typeof fetch = (...a) => fetch
 	};
 }
 
-/** Is the phased builder switched on (`NOVA_PHASIC=on`)? Off: the think agent as before. */
-export function phasicOn(env: unknown): boolean {
-	return ((env as { NOVA_PHASIC?: string }).NOVA_PHASIC ?? '').trim().toLowerCase() === 'on';
+/** Is the phased builder on for this builder user? `NOVA_PHASIC=on`: everyone. `NOVA_PHASIC_USERS`: only
+ *  the listed user ids (a test account tries it while everyone else keeps the think agent). */
+export function phasicOn(env: unknown, userId?: string): boolean {
+	const e = env as { NOVA_PHASIC?: string; NOVA_PHASIC_USERS?: string };
+	if ((e.NOVA_PHASIC ?? '').trim().toLowerCase() === 'on') return true;
+	const users = (e.NOVA_PHASIC_USERS ?? '').split(',').map((u) => u.trim()).filter(Boolean);
+	return !!userId && users.includes(userId);
 }
 
 /** A real browser's capture of the preview → the problems worth a fix pass (never a favicon). */
