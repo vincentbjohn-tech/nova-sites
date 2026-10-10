@@ -168,3 +168,27 @@ describe('a FIND or REPLACE closed with a stray XML tag (a common slip, 11 Oct) 
 		expect(out.edits[0]).toEqual({ path: 'public/a.html', find: '<p>x</p>\n</section>', replace: '<p>y</p>\n</section>' });
 	});
 });
+
+describe('a new page gets into every menu by code (the model writes only the new page)', () => {
+	it('copies the last menu link of each run of page links, with the new address and name', async () => {
+		const { addMenuLink } = await import('./format');
+		const html = '<header><nav class="nav"><a href="index.html" class="on">Home</a> <a href="services.html">Services</a>\n<a href="contact.html">Contact</a></nav></header><p><a href="services.html">see services</a></p><footer><ul><li><a href="about.html">About</a></li><li><a href="contact.html">Contact</a></li></ul></footer>';
+		const out = addMenuLink(html, 'public/gallery.html', 'Gallery');
+		expect(out).toContain('<a href="contact.html">Contact</a><a href="gallery.html">Gallery</a></nav>');
+		expect(out).toContain('<li><a href="contact.html">Contact</a></li><li><a href="gallery.html">Gallery</a></li></ul>');
+		// A lone link in a sentence is not a menu; the class marking the current page isn't copied.
+		expect(out).toContain('<p><a href="services.html">see services</a></p>');
+		expect(out).not.toContain('class="on">Gallery');
+	});
+	it('works with the pretty addresses, and never twice', async () => {
+		const { addMenuLink } = await import('./format');
+		const html = '<nav><a href="/">Home</a><a href="/services">Services</a><a href="/about">About</a></nav>';
+		const once = addMenuLink(html, 'public/gallery.html', 'Gallery');
+		expect(once).toBe('<nav><a href="/">Home</a><a href="/services">Services</a><a href="/about">About</a><a href="/gallery">Gallery</a></nav>');
+		expect(addMenuLink(once, 'public/gallery.html', 'Gallery')).toBe(once);
+	});
+	it('a page with no menu is left as it is', async () => {
+		const { addMenuLink } = await import('./format');
+		expect(addMenuLink('<p>no menu</p>', 'public/gallery.html', 'Gallery')).toBe('<p>no menu</p>');
+	});
+});

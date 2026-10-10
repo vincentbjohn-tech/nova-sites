@@ -203,3 +203,66 @@ export function pageShortfalls(path: string, html: string): string[] {
 		out.push(`${path} opens without a photo; its first section needs one (an <img> or a background image)`);
 	return out;
 }
+
+/** An address of one of the site's own pages ("about.html", "/about", "/", "./index.html"). */
+function isPageHref(href: string): boolean {
+	if (/^(?:[a-z]+:|#|\/\/)/i.test(href)) return false;
+	return /\.html?$/i.test(href) || /^\.?\/?[a-z0-9-]*\/?$/i.test(href);
+}
+
+/**
+ * Add a new page to every menu of a page, by code (the model writes only the new page: rewriting every
+ * page for one link took two minutes, 11 Oct). A menu is a run of two or more links to the site's own
+ * pages, side by side (or each in its own <li>); the last link of the run is copied with the new address
+ * and name, in the same address style, without a "current page" mark. Never twice; a lone link in a
+ * sentence is not a menu.
+ */
+export function addMenuLink(html: string, newPath: string, label: string): string {
+	const base = newPath.replace(/^public\//, '').replace(/\.html?$/i, '');
+	const already = new RegExp(`href="(?:\\.?\\/)?${base}(?:\\.html?)?\\/?"`, 'i');
+	if (already.test(html)) return html;
+	const anchors = [...html.matchAll(/<a\b([^>]*)\bhref="([^"]*)"([^>]*)>([\s\S]*?)<\/a>/gi)].map((m) => ({
+		start: m.index!,
+		end: m.index! + m[0].length,
+		before: m[1],
+		href: m[2],
+		after: m[3],
+		page: isPageHref(m[2]),
+	}));
+	const inserts: { at: number; text: string }[] = [];
+	let run: typeof anchors = [];
+	const close = () => {
+		if (run.length >= 2) {
+			const last = run[run.length - 1];
+			const href = /\.html?$/i.test(last.href) ? last.href.replace(/[^/]*\.html?$/i, `${base}.html`) : `${last.href.startsWith('/') ? '/' : ''}${base}`;
+			const attrs = (last.before + last.after)
+				.replace(/\s*aria-current="[^"]*"/gi, '')
+				.replace(/class="([^"]*)"/i, (_m, c: string) => {
+					const kept = c.split(/\s+/).filter((x) => x && !/^(?:on|active|current|is-active|is-current|selected)$/i.test(x));
+					return kept.length ? `class="${kept.join(' ')}"` : '';
+				})
+				.replace(/\s{2,}/g, ' ')
+				.trimEnd();
+			const link = `<a href="${href}"${attrs ? ` ${attrs.trim()}` : ''}>${label}</a>`;
+			const tail = /^\s*<\/li>/i.exec(html.slice(last.end));
+			if (tail) {
+				const open = /<li\b[^>]*>\s*$/i.exec(html.slice(0, last.start));
+				inserts.push({ at: last.end + tail[0].length, text: `${open ? open[0].trim() : '<li>'}${link}</li>` });
+			} else inserts.push({ at: last.end, text: link });
+		}
+		run = [];
+	};
+	for (const a of anchors) {
+		if (!a.page) {
+			close();
+			continue;
+		}
+		const prev = run[run.length - 1];
+		if (prev && !/^\s*(?:<\/li>\s*<li\b[^>]*>\s*)?$/i.test(html.slice(prev.end, a.start))) close();
+		run.push(a);
+	}
+	close();
+	let out = html;
+	for (const i of inserts.sort((x, y) => y.at - x.at)) out = out.slice(0, i.at) + i.text + out.slice(i.at);
+	return out;
+}
