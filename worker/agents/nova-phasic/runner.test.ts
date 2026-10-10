@@ -323,3 +323,36 @@ describe('a workspace call that never answers never hangs the request', () => {
 		expect(r.failed.map((f) => f.phase)).toEqual(['Your change']);
 	});
 });
+
+describe('a brand-new site has no look until its stylesheet is written', () => {
+	it('pages finished before the look are not deployed; the look phase deploys them together', async () => {
+		const contract = `<<<PLAN>>>\n${JSON.stringify({
+			reply: 'x',
+			phases: [{ name: 'Your look', files: ['public/styles.css'] }, { name: 'Home page', files: ['public/index.html'] }],
+			design: { classes: '.btn', header: '<header/>', footer: '<footer/>' },
+		})}\n<<<END PLAN>>>`;
+		const deployedWith: string[][] = [];
+		const s = fakeSite({}, [
+			contract,
+			// The page answers first (no delay), the look later.
+			(p) => (p.includes('THIS PHASE: Your look') ? 'SLOW' : page('public/index.html', '<a class="btn">x</a>')),
+			(p) => (p.includes('THIS PHASE: Your look') ? 'SLOW' : page('public/index.html', '<a class="btn">x</a>')),
+		]);
+		const model = s.deps.model;
+		s.deps.model = async (m, o) => {
+			const out = await model(m, o);
+			if (out === 'SLOW') {
+				await new Promise((r) => setTimeout(r, 30));
+				return '<<<FILE public/styles.css>>>\n.btn{}\n<<<END FILE>>>';
+			}
+			return out;
+		};
+		const deploy = s.deps.deploy;
+		s.deps.deploy = async () => {
+			deployedWith.push(Object.keys(s.files).sort());
+			return deploy();
+		};
+		await runRequest(s.deps, { request: 'A site' });
+		expect(deployedWith[0]).toEqual(['public/index.html', 'public/styles.css']);
+	});
+});

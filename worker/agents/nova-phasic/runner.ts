@@ -206,7 +206,9 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 		if (has.known) return;
 		const paths = (await deps.listFiles()).map((p) => p.replace(/^\/+/, ''));
 		has.page = paths.some((p) => /^public\/.+\.html?$/.test(p));
-		has.css = paths.includes('public/styles.css') || !paths.some((p) => p.startsWith('public/'));
+		// Only a stylesheet that is there counts: a brand-new site has no look yet (10 Oct: its pages went
+		// to the preview unstyled because an empty site was taken for one that needs none).
+		has.css = paths.includes('public/styles.css');
 		has.known = true;
 	};
 	let skipped = false;
