@@ -62,7 +62,17 @@ export interface RequestResult {
 }
 
 const TEXT_FILE = /\.(?:html?|css|js|mjs|svg|txt|xml|json|webmanifest)$/i;
-const DIRECT_PHASE = 'Your change';
+/** A small change's name when the answer gives none: the start of her own request, politeness trimmed. */
+export function ownWordsName(request: string): string {
+	const words = request
+		.trim()
+		.replace(/^(?:(?:can|could|would) you(?: please)?|please|hey nova,?|nova,?)\s+/i, '')
+		.replace(/\s+/g, ' ');
+	// Cut at 34 characters on a word boundary (a word cut in half is dropped), trailing punctuation off.
+	const head = words.length > 34 ? (/\s/.test(words[34]) ? words.slice(0, 34) : words.slice(0, 34).replace(/\s+\S*$/, '')) : words;
+	const cut = words.length > 34 ? `${head.replace(/[\s,.;:!?-]+$/, '')}…` : words;
+	return cut ? `${cut.charAt(0).toUpperCase()}${cut.slice(1)}` : 'Your change';
+}
 const FIX_PHASE = 'Fixing a small problem';
 
 function order(paths: string[]): string[] {
@@ -213,10 +223,16 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 			}
 			// Never in a page: a builder marker (a slip that showed as ">>" in a nav, 10 Oct) or placeholder
 			// text an owner's visitors would read ("[[PLACEHOLDER: phone]]").
+			// Only what this answer ADDS is judged: a page an older build left with [[…]] can still be edited
+			// (11 Oct: every edit to such a page was refused, whatever was asked).
+			const there = writes.size ? new Set((await deps.listFiles()).map((f) => f.replace(/^\/+/, ''))) : new Set<string>();
 			for (const [path, content] of writes) {
-				if (/<<<|>>>/.test(content)) problems.push(`A builder marker (<<< or >>>) is inside ${path}: write that file again without it.`);
-				if (/\.html?$/.test(path) && /\[\[[^\]]*\]\]/.test(content))
-					problems.push(`${path} shows placeholder text like [[…]]: leave the missing fact out instead (never show placeholder text).`);
+				// A file that isn't there yet has nothing before (and is never read: such reads never answered).
+				const before = there.has(path) ? ((await deps.readFile(path).catch(() => '')) ?? '') : '';
+				const count = (re: RegExp, t: string) => (t.match(re) ?? []).length;
+				if (count(/<<<|>>>/g, content) > count(/<<<|>>>/g, before)) problems.push(`A builder marker (<<< or >>>) is inside ${path}: write that file again without it.`);
+				if (/\.html?$/.test(path) && count(/\[\[[^\]]*\]\]/g, content) > count(/\[\[[^\]]*\]\]/g, before))
+					problems.push(`${path} shows new placeholder text like [[…]]: leave the missing fact out instead (never show placeholder text).`);
 			}
 			// A new site's new pages are full pages (enough sections, a photo up top), as the old builder's.
 			if (fullPages) for (const f of out.files) problems.push(...pageShortfalls(f.path, writes.get(f.path) ?? f.content));
@@ -271,6 +287,8 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 	};
 
 	let needsCss = false;
+	/** A small change's name (the answer's NAME, else her own words). */
+	let directName = 'Your change';
 	/** Classes already unstyled before this request: the style pass is only for ones it adds. */
 	let unstyledBefore = new Set<string>();
 	const noteUnstyled = (site: { path: string; content: string }[]) => {
@@ -294,6 +312,8 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 			const first = parseFirstAnswer(answer);
 			if (first.kind === 'answer') return { reply: first.reply, changed: false, phases: [], failed: [] };
 			if (first.kind === 'direct') {
+				directName = first.output.name ?? ownWordsName(input.request);
+				const DIRECT_PHASE = directName;
 				const files = [...new Set([...first.output.files.map((f) => f.path), ...first.output.edits.map((e) => e.path)])];
 				deps.emit('phase_generated', { message: DIRECT_PHASE, phase: phaseInfo(DIRECT_PHASE, files, 0, 1) });
 				deps.emit('phase_implementing', { message: DIRECT_PHASE, phase: phaseInfo(DIRECT_PHASE, files, 0, 1) });
@@ -467,7 +487,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 		reply,
 		changed,
 		...(title ? { title } : {}),
-		phases: plan ? plan.phases.map((ph) => ph.name) : changed ? [DIRECT_PHASE] : [],
+		phases: plan ? plan.phases.map((ph) => ph.name) : changed ? [directName] : [],
 		failed: failed.filter((f) => f.phase !== FIX_PHASE),
 		...(previewUrl ? { previewUrl } : {}),
 	};
