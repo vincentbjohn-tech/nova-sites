@@ -361,3 +361,19 @@ describe('new-site pages are asked for again when thin', () => {
 		expect(PHASE_SYSTEM).toMatch(/never two .*book/i);
 	});
 });
+
+describe('her closing words never call the preview live', () => {
+	it('"is live" / "now live" about a change becomes "is in your preview"; other uses of the word stay', async () => {
+		const { previewWords } = await import('./runner');
+		expect(previewWords('The About page is live with her story. The Contact page is now live, and the menu is live too.')).toBe(
+			'The About page is in your preview with her story. The Contact page is now in your preview, and the menu is in your preview too.',
+		);
+		expect(previewWords('The services are live in preview now.')).toBe('The services are in your preview now.');
+		expect(previewWords('Clients who live nearby can book online.')).toBe('Clients who live nearby can book online.');
+	});
+	it('the request reply goes through it', async () => {
+		const s = fakeSite({ 'public/index.html': '<h1>Old</h1>' }, ['<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Old</h1>\n<<<REPLACE>>>\n<h1>New</h1>\n<<<END EDIT>>>\n<<<REPLY>>>\nThe new headline is live.\n<<<END REPLY>>>']);
+		const r = await runRequest(s.deps, { request: 'Headline' });
+		expect(r.reply).toBe('The new headline is in your preview.');
+	});
+});
