@@ -693,6 +693,7 @@ export class ThinkCodingBehavior
 					},
 					onPlan: (plan) => touch({ plan, done: resume?.done ?? [] }),
 					onPhaseDone: (i) => touch({ done: [...(this.state.novaActiveTurn?.done ?? []), i] }),
+					log: (message, data) => this.logger.warn(message, data),
 				},
 				{ request, history, browserCheck: true, resume },
 			);

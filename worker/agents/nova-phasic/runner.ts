@@ -35,6 +35,8 @@ export interface RunnerDeps {
 	/** Persist progress so a restart carries on (the plan, then each phase as it finishes). */
 	onPlan?(plan: Plan): void;
 	onPhaseDone?(index: number): void;
+	/** Structured log lines (why a phase failed, what was retried). */
+	log?(message: string, data: Record<string, unknown>): void;
 }
 
 export interface RequestInput {
@@ -200,6 +202,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 				writes.set(path, r.content);
 			}
 			if (!problems.length) return { writes, reply: out.reply, layout: out.layout };
+			deps.log?.(attempt >= 1 ? 'nova_phase_failed' : 'nova_phase_retry', { problems: problems.join('\n').slice(0, 2000) });
 			if (attempt >= 1) throw new Problem(problems.join('\n'));
 			// The retry answers only what was wrong or missing: it adds to the first answer (seen 10 Oct: a
 			// look phase's stylesheet was dropped because its retry only brought the missing home page).
@@ -249,6 +252,12 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 	};
 
 	let needsCss = false;
+	/** Classes already unstyled before this request: the style pass is only for ones it adds. */
+	let unstyledBefore = new Set<string>();
+	const noteUnstyled = (site: { path: string; content: string }[]) => {
+		const css = site.find((f) => f.path === 'public/styles.css');
+		if (css) unstyledBefore = new Set(unstyledClasses(site.filter((f) => /\.html?$/.test(f.path)), css.content));
+	};
 	const failed: RequestResult['failed'] = [];
 	const replies: string[] = [];
 	let changed = false;
@@ -258,6 +267,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 	try {
 		if (!plan) {
 			const site = await readSite();
+			noteUnstyled(site);
 			active.add('your request');
 			const firstPrompt = `THE OWNER'S REQUEST:\n${withoutReference(input.request)}${history}\n\nTHE SITE'S FILES NOW:\n${filesBlock(site)}`;
 			const answer = await deps.model([{ role: 'system', content: FIRST_SYSTEM }, { role: 'user', content: firstPrompt }], { label: 'first' });
@@ -355,7 +365,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 		if (changed) {
 			const site = await readSite().catch(() => [] as { path: string; content: string }[]);
 			const css = site.find((f) => f.path === 'public/styles.css');
-			const missing = css ? unstyledClasses(site.filter((f) => /\.html?$/.test(f.path)), css.content) : [];
+			const missing = css ? unstyledClasses(site.filter((f) => /\.html?$/.test(f.path)), css.content).filter((c) => !unstyledBefore.has(c)) : [];
 			if (missing.length) {
 				const STYLE_PHASE = 'Finishing the look';
 				deps.emit('phase_generated', { message: STYLE_PHASE, phase: phaseInfo(STYLE_PHASE, ['public/styles.css'], 98, 1) });

@@ -61,7 +61,8 @@ function body(raw: string, keepTrailingNewline: boolean): string {
 	return text;
 }
 
-const OPEN = /<<<(FILE|EDIT|APPEND) ([^>\n]+)>>>\n?/g;
+// `<<<FILE public/x.html>>>`, or the slip `<<<FILE>>> public/x.html`.
+const OPEN = /<<<(FILE|EDIT|APPEND)(?: ([^>\n]+)>>>|>>> *([^\s<>]+)) *\n?/g;
 
 export function parsePhaseOutput(text: string): PhaseOutput {
 	const out: PhaseOutput = { files: [], edits: [], dropped: [], unterminated: [] };
@@ -74,12 +75,12 @@ export function parsePhaseOutput(text: string): PhaseOutput {
 	let m: RegExpExecArray | null;
 	while ((m = OPEN.exec(text))) {
 		const kind = m[1];
-		const path = normalPath(m[2]);
+		const path = normalPath(m[2] ?? m[3]);
 		const start = m.index + m[0].length;
 		const endMarker = kind === 'FILE' ? '<<<END FILE>>>' : kind === 'APPEND' ? '<<<END APPEND>>>' : '<<<END EDIT>>>';
 		const end = text.indexOf(endMarker, start);
 		// Another block opening before this one ends: this one was cut off.
-		const nextOpen = text.slice(start).search(/<<<(?:FILE|EDIT|APPEND) [^>\n]+>>>/);
+		const nextOpen = text.slice(start).search(/<<<(?:FILE|EDIT|APPEND)(?: [^>\n]+>>>|>>> *[^\s<>]+)/);
 		if (end < 0 || (nextOpen >= 0 && start + nextOpen < end)) {
 			out.unterminated.push(path);
 			continue;

@@ -127,3 +127,16 @@ describe('classes a page uses that the stylesheet never styles', () => {
 		expect(unstyledClasses(pages, css)).toEqual(['story']);
 	});
 });
+
+describe('the marker with the path after it (a common slip) still counts', () => {
+	it('reads <<<APPEND>>> path, <<<FILE>>> path and <<<EDIT>>> path', () => {
+		const out = parsePhaseOutput(
+			'<<<APPEND>>> public/styles.css\n.a{}\n<<<END APPEND>>>\n<<<FILE>>> public/x.html\n<h1>x</h1>\n<<<END FILE>>>\n<<<EDIT>>> public/y.html\n<<<FIND>>>\na\n<<<REPLACE>>>\nb\n<<<END EDIT>>>',
+		);
+		expect(out.edits).toEqual([
+			{ path: 'public/styles.css', find: '', replace: '.a{}' },
+			{ path: 'public/y.html', find: 'a', replace: 'b' },
+		]);
+		expect(out.files).toEqual([{ path: 'public/x.html', content: '<h1>x</h1>\n' }]);
+	});
+});

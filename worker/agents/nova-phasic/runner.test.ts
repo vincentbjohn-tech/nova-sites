@@ -392,3 +392,25 @@ describe('a retry adds to the first answer, it does not replace it', () => {
 		expect(s.files['public/about.html']).toContain('About');
 	});
 });
+
+describe('the style pass looks only at what this request added', () => {
+	it('an edit on a site that already had unstyled classes runs no style pass', async () => {
+		const s = fakeSite({ 'public/styles.css': '.a{}', 'public/index.html': '<p class="old-unstyled">x</p><h1>Old</h1>' }, [
+			'<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Old</h1>\n<<<REPLACE>>>\n<h1>New</h1>\n<<<END EDIT>>>',
+		]);
+		await runRequest(s.deps, { request: 'Headline' });
+		expect(s.prompts).toHaveLength(1);
+	});
+});
+
+describe('a failed phase says why in the log', () => {
+	it('the problems that failed it are logged', async () => {
+		const logs: string[] = [];
+		const miss = '<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Olde</h1>\n<<<REPLACE>>>\n<h1>New</h1>\n<<<END EDIT>>>';
+		const s = fakeSite({ 'public/index.html': '<h1>Old</h1>' }, [miss, miss]);
+		s.deps.log = (msg, data) => logs.push(`${msg} ${JSON.stringify(data)}`);
+		await runRequest(s.deps, { request: 'Headline' });
+		expect(logs.join('\n')).toContain('nova_phase_failed');
+		expect(logs.join('\n')).toContain('Olde');
+	});
+});
