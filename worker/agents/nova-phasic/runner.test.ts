@@ -148,18 +148,16 @@ describe('a new site: plan, then phases, pages side by side, one deploy at a tim
 		expect(s.events.filter((e) => e.type === 'nova_progress').length).toBeGreaterThanOrEqual(2);
 	});
 
-	it('a browser problem at the end gets one fix pass', async () => {
+	it('a browser problem at the end gets one fix pass (new pages; a small direct edit skips the check)', async () => {
+		const plan = `<<<PLAN>>>\n${JSON.stringify({ reply: 'x', phases: [{ name: 'About', files: ['public/about.html'] }] })}\n<<<END PLAN>>>`;
 		const s = fakeSite(
-			{ 'public/index.html': '<h1>Old</h1><script>oops(</script>' },
-			[
-				'<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Old</h1>\n<<<REPLACE>>>\n<h1>New</h1>\n<<<END EDIT>>>',
-				'<<<EDIT public/index.html>>>\n<<<FIND>>>\n<script>oops(</script>\n<<<REPLACE>>>\n\n<<<END EDIT>>>',
-			],
-			{ browserErrors: [['SyntaxError: Unexpected end of input (index.html)']] },
+			{ 'public/index.html': '<h1>Home</h1>' },
+			[plan, page('public/about.html', '<h1>About</h1><script>oops(</script>'), '<<<EDIT public/about.html>>>\n<<<FIND>>>\n<script>oops(</script>\n<<<REPLACE>>>\n\n<<<END EDIT>>>'],
+			{ browserErrors: [['SyntaxError: Unexpected end of input (about.html)']] },
 		);
-		await runRequest(s.deps, { request: 'Headline: New', browserCheck: true });
-		expect(s.prompts[1]).toContain('SyntaxError');
-		expect(s.files['public/index.html']).toBe('<h1>New</h1>');
+		await runRequest(s.deps, { request: 'About page', browserCheck: true });
+		expect(s.prompts[2]).toContain('SyntaxError');
+		expect(s.files['public/about.html']).not.toContain('oops(');
 	});
 
 	it('resumes after a restart: phases already done are not written again', async () => {
@@ -375,5 +373,32 @@ describe('her closing words never call the preview live', () => {
 		const s = fakeSite({ 'public/index.html': '<h1>Old</h1>' }, ['<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Old</h1>\n<<<REPLACE>>>\n<h1>New</h1>\n<<<END EDIT>>>\n<<<REPLY>>>\nThe new headline is live.\n<<<END REPLY>>>']);
 		const r = await runRequest(s.deps, { request: 'Headline' });
 		expect(r.reply).toBe('The new headline is in your preview.');
+	});
+});
+
+describe('speed: a new page and a small edit', () => {
+	it('a new page on an existing site: the model writes the page, the builder adds it to every menu', async () => {
+		const nav = '<nav><a href="index.html">Home</a><a href="about.html">About</a></nav>';
+		const plan = `<<<PLAN>>>\n${JSON.stringify({ reply: 'x', phases: [{ name: 'Gallery page', files: ['public/gallery.html'] }] })}\n<<<END PLAN>>>`;
+		const s = fakeSite({ 'public/styles.css': 'nav{}', 'public/index.html': `${nav}<h1>Home</h1>`, 'public/about.html': `${nav}<h1>About</h1>` }, [plan, page('public/gallery.html', nav)]);
+		await runRequest(s.deps, { request: 'Add a Gallery page', browserCheck: true });
+		expect(s.files['public/index.html']).toContain('<a href="gallery.html">Gallery</a>');
+		expect(s.files['public/about.html']).toContain('<a href="gallery.html">Gallery</a>');
+		expect(s.files['public/gallery.html']).toContain('<a href="gallery.html">Gallery</a>');
+		expect(s.prompts[1]).toMatch(/adds it to every page's menu/i);
+	});
+	it('a small direct edit skips the end-of-request browser check', async () => {
+		let checked = 0;
+		const s = fakeSite({ 'public/index.html': '<h1>Old</h1>' }, ['<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>Old</h1>\n<<<REPLACE>>>\n<h1>New</h1>\n<<<END EDIT>>>']);
+		s.deps.browserCheck = async () => {
+			checked += 1;
+			return [];
+		};
+		await runRequest(s.deps, { request: 'Headline', browserCheck: true });
+		expect(checked).toBe(0);
+	});
+	it('the closing band carries hours, a short price list and the button', async () => {
+		const { PHASE_SYSTEM } = await import('./prompts');
+		expect(PHASE_SYSTEM).toMatch(/closing call-to-action band with the hours, a short price list and the booking button/i);
 	});
 });

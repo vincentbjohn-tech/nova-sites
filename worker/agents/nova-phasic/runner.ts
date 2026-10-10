@@ -12,7 +12,7 @@
  * the whole flow is tested with fakes. While a model call runs, a `nova_progress` line goes out every
  * few seconds: the owner never watches a silent minute.
  */
-import { applyEdits, pageShortfalls, parsePhaseOutput, unstyledClasses, type PhaseOutput } from './format';
+import { addMenuLink, applyEdits, pageShortfalls, parsePhaseOutput, unstyledClasses, type PhaseOutput } from './format';
 import { parseFirstAnswer, runPhases, type Plan } from './plan';
 import { FIRST_SYSTEM, FIX_SYSTEM, PHASE_SYSTEM, STYLE_FIX_SYSTEM, filesBlock } from './prompts';
 
@@ -361,6 +361,24 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 							ph.files,
 							needsCss,
 						);
+						// A new page on an existing site joins every page's menu by code (the model wrote only the page).
+						if (!needsCss) {
+							const all = await readSite();
+							const had = new Set(all.map((f) => f.path));
+							const fresh = [...done.writes.keys()].filter((f) => /^public\/[^/]+\.html?$/.test(f) && !had.has(f) && !/(^|\/)(index|404)\.html?$/.test(f));
+							for (const path of fresh) {
+								const name = path.replace(/^public\//, '').replace(/\.html?$/, '').replace(/[-_]+/g, ' ');
+								const label = name.charAt(0).toUpperCase() + name.slice(1);
+								for (const f of all.filter((x) => /\.html?$/.test(x.path))) {
+									const now = done.writes.get(f.path) ?? f.content;
+									const linked = addMenuLink(now, path, label);
+									if (linked !== now) done.writes.set(f.path, linked);
+								}
+								const own = done.writes.get(path)!;
+								const linkedOwn = addMenuLink(own, path, label);
+								if (linkedOwn !== own) done.writes.set(path, linkedOwn);
+							}
+						}
 						active.delete(ph.name);
 						if (done.layout && !p.layout) {
 							p.layout = done.layout;
@@ -412,7 +430,8 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 			if (skipped) await deploy();
 		}
 
-		if (changed && input.browserCheck) {
+		// The browser check is for new pages and new sites; a small direct edit is done once it's in the preview.
+		if (changed && input.browserCheck && plan) {
 			const errors = await deps.browserCheck().catch(() => []);
 			if (errors.length) {
 				deps.emit('phase_generated', { message: FIX_PHASE, phase: phaseInfo(FIX_PHASE, [], 99, 1) });
