@@ -55,7 +55,12 @@ export const PHASE_SYSTEM = `You are Nova's website builder, writing ONE phase o
 
 ${SITE_RULES}
 
-Write exactly this phase's files (and only the menu/link edits it needs on other pages). A page is a full page, not a stub: several sections that suit it (a services page: every service with its price, what's included and who it's for, then booking; a home page: hero, what she offers, why her, how booking works, a closing call to action), at the quality the request asks for. Whole files for new pages; EDIT blocks for existing files. End with a REPLY of one sentence about what this phase added.
+Write exactly this phase's files (and only the menu/link edits it needs on other pages). A page is a full page, not a stub, at the craft of the reference page in the request. Every page opens with a hero section that has a real photo (never an empty colour band). A new site's pages, at least:
+- home page (6+ sections): hero with photo; the services or menu with prices; a photo strip of recent work (3-4 photos with short captions); why her; how booking works with an inline booking panel (choose a service and a day, then a button to the booking link; it never claims a booking is confirmed); a closing call-to-action band.
+- services page (4+): hero with photo; every service with price, what's included and who it's for; questions and answers; booking.
+- about page (4+): hero with photo; her story; how she works; a closing call to action.
+- contact page (4+): hero with photo; hours, place and how to book side by side with a message form; questions and answers or what to expect; a closing booking band.
+On phones there are never two Book buttons on screen at once: a sticky phone booking bar may appear only after the hero's own button has scrolled out of view, and never covers the hero. Whole files for new pages; EDIT blocks for existing files. End with a REPLY of one sentence about what this phase added.
 
 When THE CLASSES are given, a page uses only those classes (plus small page-only styles in a <style> if it must) and the stylesheet styles every one of them; both copy THE SHARED HEADER AND FOOTER exactly.
 
