@@ -103,8 +103,10 @@ export function parsePhaseOutput(text: string): PhaseOutput {
 		for (const pair of inner.split('<<<FIND>>>').slice(1)) {
 			const at = pair.indexOf('<<<REPLACE>>>');
 			if (at < 0) continue;
-			const find = body(pair.slice(0, at).replace(/^\n/, ''), false);
-			const replace = body(pair.slice(at + '<<<REPLACE>>>'.length).replace(/^\n/, ''), false);
+			// A stray XML-style closer ("</FIND>", "</REPLACE>") on its own last line is a slip, not page text.
+			const unclose = (t: string) => t.replace(/\n?[ \t]*<\/(?:FIND|REPLACE)>[ \t]*$/i, '');
+			const find = unclose(body(pair.slice(0, at).replace(/^\n/, ''), false));
+			const replace = unclose(body(pair.slice(at + '<<<REPLACE>>>'.length).replace(/^\n/, ''), false));
 			if (find.trim()) out.edits.push({ path, find, replace });
 		}
 	}

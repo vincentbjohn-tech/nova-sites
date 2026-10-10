@@ -157,3 +157,14 @@ describe('a new page is a full page (Vincent, 11 Oct: as rich as the old builder
 		expect(pageShortfalls('public/404.html', '<section>x</section>')).toEqual([]);
 	});
 });
+
+describe('a FIND or REPLACE closed with a stray XML tag (a common slip, 11 Oct) still matches', () => {
+	it('drops a trailing </FIND> or </REPLACE> line from the block', () => {
+		const out = parsePhaseOutput('<<<EDIT public/a.html>>>\n<<<FIND>>>\n<h2>Before you book.</h2>\n</FIND>\n<<<REPLACE>>>\n<h2>First visit</h2>\n</REPLACE>\n<<<END EDIT>>>');
+		expect(out.edits).toEqual([{ path: 'public/a.html', find: '<h2>Before you book.</h2>', replace: '<h2>First visit</h2>' }]);
+	});
+	it('keeps a real closing tag that is part of the page', () => {
+		const out = parsePhaseOutput('<<<EDIT public/a.html>>>\n<<<FIND>>>\n<p>x</p>\n</section>\n<<<REPLACE>>>\n<p>y</p>\n</section>\n<<<END EDIT>>>');
+		expect(out.edits[0]).toEqual({ path: 'public/a.html', find: '<p>x</p>\n</section>', replace: '<p>y</p>\n</section>' });
+	});
+});
