@@ -8,7 +8,10 @@ const SITE_RULES = `THE SITE
 - One shared stylesheet public/styles.css linked from every page; small page-only styles may sit in a <style> in that page.
 - Every page has the same header (logo/name and the menu linking every page) and the same footer: copy THE SHARED HEADER AND FOOTER when given, else copy them from public/index.html when it exists.
 - Real, specific copy for this business from the request; never lorem ipsum.
-- Never invent a fact: no phone number, address, price, hours, link, review, rating, review count, licence number or award the request doesn't give (and never a 555 number or one copied from an example). If the request asks for placeholders, a missing fact is a clearly marked [[PLACEHOLDER]]; otherwise leave it out.
+- Never invent a fact: no phone number, address, price, hours, link, review, rating, review count, licence number or award the request doesn't give (and never a 555 number or one copied from an example).
+- Never show placeholder text on a page: no [[…]], no "TBD", no "your phone here". A fact the request doesn't give is left out (drop that line, button or section), even where the request says to mark placeholders.
+- Nothing is hidden until a script runs: no text, section or button that starts invisible and waits for JavaScript or a scroll animation to appear.
+- Every text stays readable on its background: check emphasis (em, strong), links and button labels on dark and coloured bands, not only on the page background.
 - Images: use the addresses the request gives; otherwise https://images.unsplash.com photos that fit, with width/height and alt text. Every page: <title>, meta description, viewport meta, one <h1>.
 - Mobile first: every page works at 390px wide. Accessible: real buttons and links, labels, contrast.
 - If the request carries a style (colours, type, components, MUST/NEVER rules), follow it exactly.
@@ -43,13 +46,10 @@ DECIDE, then answer in exactly one of these three ways:
 <<<PLAN>>>
 {"reply": "what you'll do, in one or two plain sentences, specific to their words (no style names, font names or colour codes)",
  "title": "a short site name (only for a new site)",
- "design": {"classes": "only for a new site: every class the pages will use, one per line with what it is (e.g. .btn the main button; .card a boxed item; .price-list the list of services with prices)",
-            "header": "only for a new site: the exact header markup every page copies (logo/name, a menu linking every planned page, the main button)",
-            "footer": "only for a new site: the exact footer markup every page copies"},
  "phases": [{"name": "Your look and home page", "files": ["public/styles.css", "public/index.html"], "after": []},
             {"name": "Services with prices", "files": ["public/services.html"], "after": [0]}]}
 <<<END PLAN>>>
-Plan rules: phase names are in the owner's words (they see them as the progress list), 3-6 words each. Each phase writes its own files; no file in two phases. A new site: the plan carries "design" (the class list, the header and the footer), and then the shared look (public/styles.css, styling every class in the list) and EVERY page, the home page too, are each their own phase with "after": [], so they are all written side by side. A new page on an existing site: one phase for the page, plus the menu edit of the other pages in the same phase. At most 6 phases. "after" lists earlier phase indexes only.`;
+Plan rules: phase names are in the owner's words (they see them as the progress list), 3-6 words each. Each phase writes its own files; no file in two phases. A new site: the first phase is the shared look AND the home page together (public/styles.css and public/index.html, with the full menu for every planned page); every other page is its own phase with "after": [0], so those pages are written side by side once the look exists. A new page on an existing site: one phase for the page, plus the menu edit of the other pages in the same phase. At most 6 phases. "after" lists earlier phase indexes only.`;
 
 export const PHASE_SYSTEM = `You are Nova's website builder, writing ONE phase of a plan. The owner is a business owner, not a developer.
 

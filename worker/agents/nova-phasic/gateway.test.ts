@@ -58,3 +58,16 @@ describe('effort per call: the plan quick, the pages with more care', () => {
 		expect(seen).toEqual(['low', 'medium', 'medium', 'high']);
 	});
 });
+
+describe('the look runs at its own effort', () => {
+	it('label "look" → NOVA_LOOK_EFFORT (high by default)', async () => {
+		const seen: unknown[] = [];
+		const model = phaseModel(env, async (_u, init) => {
+			seen.push(JSON.parse(String(init?.body)).reasoning_effort);
+			return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+		})!;
+		await model([], { label: 'look' });
+		await model([], { label: 'look retry' });
+		expect(seen).toEqual(['high', 'high']);
+	});
+});

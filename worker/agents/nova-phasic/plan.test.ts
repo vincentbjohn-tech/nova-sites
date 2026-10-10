@@ -108,39 +108,39 @@ describe('running the phases: in order of what they wait for, independent ones s
 	});
 });
 
-describe('a design contract makes every phase independent', () => {
-	it('with the class list and the shared header, no phase waits for another (whatever the plan said)', () => {
-		const a = parseFirstAnswer(
-			`<<<PLAN>>>\n${JSON.stringify({
-				reply: 'x',
-				phases: [{ name: 'Your look', files: ['public/styles.css'] }, { name: 'Home', files: ['public/index.html'], after: [0] }],
-				design: { classes: '.btn the button', header: '<header>H</header>', footer: '<footer>F</footer>' },
-			})}\n<<<END PLAN>>>`,
-		);
-		if (a.kind !== 'plan') throw new Error('not a plan');
-		expect(a.plan.phases.map((p) => p.after)).toEqual([[], []]);
-		expect(a.plan.classes).toBe('.btn the button');
-		expect(a.plan.layout).toBe('<header>H</header>\n<footer>F</footer>');
-	});
-});
-
-describe('with a contract, the look is its own phase', () => {
-	it('a phase that bundles the stylesheet with pages is split: the look, then one phase per page, all side by side', () => {
-		const a = parseFirstAnswer(
-			`<<<PLAN>>>\n${JSON.stringify({
-				reply: 'x',
-				phases: [
-					{ name: 'Style system and home page', files: ['public/styles.css', 'public/index.html'] },
-					{ name: 'Services with prices', files: ['public/services.html'] },
-				],
-				design: { classes: '.btn', header: '<header/>', footer: '<footer/>' },
-			})}\n<<<END PLAN>>>`,
+describe('a new site: the look and the home page together, first; every other page after them (Vincent, 10 Oct)', () => {
+	const planOf = (phases: unknown, design?: unknown) =>
+		parseFirstAnswer(`<<<PLAN>>>\n${JSON.stringify({ reply: 'x', phases, ...(design ? { design } : {}) })}\n<<<END PLAN>>>`);
+	it('the home page moves into the look phase, and pages wait for it, whatever the plan said', () => {
+		const a = planOf(
+			[
+				{ name: 'Your look', files: ['public/styles.css'] },
+				{ name: 'Home page', files: ['public/index.html'] },
+				{ name: 'Services', files: ['public/services.html'] },
+			],
+			{ classes: '.btn', header: '<header/>', footer: '<footer/>' },
 		);
 		if (a.kind !== 'plan') throw new Error('not a plan');
 		expect(a.plan.phases).toEqual([
-			{ name: 'Your look', files: ['public/styles.css'], after: [] },
-			{ name: 'Home page', files: ['public/index.html'], after: [] },
-			{ name: 'Services with prices', files: ['public/services.html'], after: [] },
+			{ name: 'Your look and home page', files: ['public/styles.css', 'public/index.html'], after: [] },
+			{ name: 'Services', files: ['public/services.html'], after: [0] },
 		]);
+		expect(a.plan.classes).toBeUndefined();
+	});
+	it('a plan that already pairs them keeps its names; pages that waited for nothing now wait for the look', () => {
+		const a = planOf([
+			{ name: 'Style and home', files: ['public/styles.css', 'public/index.html'] },
+			{ name: 'About Kristi', files: ['public/about.html'], after: [] },
+		]);
+		if (a.kind !== 'plan') throw new Error('not a plan');
+		expect(a.plan.phases).toEqual([
+			{ name: 'Style and home', files: ['public/styles.css', 'public/index.html'], after: [] },
+			{ name: 'About Kristi', files: ['public/about.html'], after: [0] },
+		]);
+	});
+	it('an edit plan with no stylesheet is left as it is', () => {
+		const a = planOf([{ name: 'Gallery page', files: ['public/gallery.html', 'public/index.html'] }]);
+		if (a.kind !== 'plan') throw new Error('not a plan');
+		expect(a.plan.phases).toEqual([{ name: 'Gallery page', files: ['public/gallery.html', 'public/index.html'], after: [] }]);
 	});
 });

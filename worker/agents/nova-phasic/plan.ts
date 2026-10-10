@@ -54,44 +54,38 @@ function cleanPlan(raw: unknown): Plan {
 				after: [...new Set((Array.isArray(p.after) ? p.after : []).filter((n): n is number => Number.isInteger(n) && n >= 0 && n < i))],
 			};
 		});
-	const design = (o.design && typeof o.design === 'object' ? o.design : {}) as Record<string, unknown>;
-	const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
-	const header = str(design.header, 6000);
-	const footer = str(design.footer, 6000);
-	const classes = str(design.classes, 6000);
 	return {
-		...(header || footer ? { layout: [header, footer].filter(Boolean).join('\n') } : {}),
-		...(classes ? { classes } : {}),
 		reply: typeof o.reply === 'string' ? o.reply.trim() : '',
 		...(typeof o.title === 'string' && o.title.trim() ? { title: o.title.trim().slice(0, 60) } : {}),
-		// With the contract in hand nothing waits: the look and every page are written side by side
-		// (the model tends to keep pages waiting for the look out of habit; seen 10 Oct).
-		phases: phases.length ? (classes && (header || footer) ? sideBySide(phases) : phases) : [FALLBACK],
+		phases: phases.length ? lookFirst(phases) : [FALLBACK],
 	};
 }
 
-/** A page's name in the owner's words from its file ("public/book-a-call.html" → "Book a call page"). */
-function pageName(path: string): string {
-	const base = path.replace(/^public\//, '').replace(/\.html?$/, '');
-	if (base === 'index') return 'Home page';
-	const words = base.replace(/[-_/]+/g, ' ').trim();
-	return `${words.charAt(0).toUpperCase()}${words.slice(1)} page`;
-}
-
-/** With a design contract nothing waits, and the look is its own phase: a phase that bundles the
- *  stylesheet with pages is split into the look and one phase per page (seen 10 Oct: "Style system and
- *  home page" alone took 96 s while the other pages were long done). */
-function sideBySide(phases: Phase[]): Phase[] {
-	const out: Phase[] = [];
-	for (const p of phases) {
-		const css = p.files.filter((f) => f === 'public/styles.css');
-		const rest = p.files.filter((f) => f !== 'public/styles.css');
-		if (css.length && rest.length) {
-			out.push({ name: 'Your look', files: css, after: [] });
-			for (const f of rest) out.push({ name: pageName(f), files: [f], after: [] });
-		} else out.push({ ...p, after: [] });
+/**
+ * A new site: the look and the home page in ONE phase, first, so the stylesheet is written with the
+ * page it styles; every other page waits for it and reads both (Vincent, 10 Oct: pages and stylesheet
+ * written side by side from a class list came out broken, header over the hero, unreadable text).
+ */
+function lookFirst(phases: Phase[]): Phase[] {
+	const look = phases.findIndex((p) => p.files.includes('public/styles.css'));
+	if (look < 0) return phases;
+	const homeAt = phases.findIndex((p) => p.files.includes('public/index.html'));
+	let out = phases.map((p) => ({ ...p, files: [...p.files], after: [...p.after] }));
+	if (homeAt >= 0 && homeAt !== look) {
+		out[look].files.push('public/index.html');
+		out[homeAt].files = out[homeAt].files.filter((f) => f !== 'public/index.html');
+		if (out[look].files.length === 2 && /^your look$/i.test(out[look].name)) out[look].name = 'Your look and home page';
 	}
-	return out.slice(0, MAX_PHASES);
+	// Drop phases left empty, renumbering what waits for what.
+	const keep = out.map((p, i) => (p.files.length || i === look ? i : -1)).filter((i) => i >= 0);
+	const index = new Map(keep.map((old, i) => [old, i]));
+	out = keep.map((old) => out[old]);
+	const lookNow = index.get(look)!;
+	return out.map((p, i) => {
+		const after = p.after.map((a) => index.get(a)).filter((a): a is number => a !== undefined && a < i);
+		const pages = p.files.some((f) => /\.html?$/.test(f));
+		return { ...p, after: i !== lookNow && pages && !after.includes(lookNow) ? [lookNow, ...after] : after };
+	});
 }
 
 export function parseFirstAnswer(text: string): FirstAnswer {
