@@ -664,7 +664,7 @@ export class ThinkCodingBehavior
 		try {
 			result = await runRequest(
 				{
-					model: (messages) => model(messages),
+					model: (messages, opts) => model(messages, opts),
 					listFiles: async () => (await this.callSpace((space) => space.glob('public/**/*'))).map((p) => p.replace(/^\/+/, '')),
 					readFile: (path) => this.callSpace((space) => space.readFile(path)),
 					writeFile: async (path, content) => {

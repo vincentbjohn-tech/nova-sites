@@ -8,17 +8,22 @@ import { resolveNovaGatewayModel } from '../think/nova-gateway';
 import type { ChatMessage } from './runner';
 
 export const NOVA_PHASE_DEFAULT_MODEL = 'cli:claude-sonnet';
-export const NOVA_PHASE_DEFAULT_EFFORT = 'low';
+export const NOVA_PLAN_DEFAULT_EFFORT = 'low';
+export const NOVA_PHASE_DEFAULT_EFFORT = 'medium';
 
 export class GatewayError extends Error {}
 
 export function phaseModel(env: unknown, fetcher: typeof fetch = (...a) => fetch(...a)) {
 	const gw = resolveNovaGatewayModel(env);
 	const model = ((env as { NOVA_PHASE_MODEL?: string }).NOVA_PHASE_MODEL ?? '').trim() || NOVA_PHASE_DEFAULT_MODEL;
-	// Low by default: a plan spent most of its output thinking at the CLI's default (10 Oct).
-	const effort = ((env as { NOVA_PHASE_EFFORT?: string }).NOVA_PHASE_EFFORT ?? '').trim() || NOVA_PHASE_DEFAULT_EFFORT;
+	// The plan is quick (low: at the CLI's default a plan spent most of its output thinking, 10 Oct); a
+	// page gets more care (medium: at low the pages came out thin).
+	const e = env as { NOVA_PLAN_EFFORT?: string; NOVA_PHASE_EFFORT?: string };
+	const planEffort = (e.NOVA_PLAN_EFFORT ?? '').trim() || NOVA_PLAN_DEFAULT_EFFORT;
+	const phaseEffort = (e.NOVA_PHASE_EFFORT ?? '').trim() || NOVA_PHASE_DEFAULT_EFFORT;
 	if (!gw) return null;
-	return async (messages: ChatMessage[]): Promise<string> => {
+	return async (messages: ChatMessage[], opts?: { label?: string }): Promise<string> => {
+		const effort = opts?.label === 'first' ? planEffort : phaseEffort;
 		const r = await fetcher(`${gw.baseURL}/chat/completions`, {
 			method: 'POST',
 			headers: { Authorization: `Bearer ${gw.apiKey}`, 'Content-Type': 'application/json' },

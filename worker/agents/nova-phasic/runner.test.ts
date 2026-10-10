@@ -356,3 +356,14 @@ describe('a brand-new site has no look until its stylesheet is written', () => {
 		expect(deployedWith[0]).toEqual(['public/index.html', 'public/styles.css']);
 	});
 });
+
+describe('facts are never invented', () => {
+	it('every call reads one rule: no made-up phone, address, review, rating or licence', async () => {
+		const { FIRST_SYSTEM, PHASE_SYSTEM } = await import('./prompts');
+		for (const p of [FIRST_SYSTEM, PHASE_SYSTEM]) {
+			expect(p).toMatch(/never invent/i);
+			expect(p).toMatch(/phone/i);
+			expect(p).toMatch(/555/);
+		}
+	});
+});

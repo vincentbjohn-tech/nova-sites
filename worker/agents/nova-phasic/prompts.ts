@@ -7,7 +7,8 @@ const SITE_RULES = `THE SITE
 - A static website: HTML pages, CSS, small vanilla JS and SVG, all under public/ (public/index.html is the home page; other pages are public/<name>.html). No frameworks, no build step, no npm.
 - One shared stylesheet public/styles.css linked from every page; small page-only styles may sit in a <style> in that page.
 - Every page has the same header (logo/name and the menu linking every page) and the same footer: copy THE SHARED HEADER AND FOOTER when given, else copy them from public/index.html when it exists.
-- Real, specific copy for this business from the request; never lorem ipsum. Never invent prices, hours, addresses or links that the request doesn't give: leave them out instead.
+- Real, specific copy for this business from the request; never lorem ipsum.
+- Never invent a fact: no phone number, address, price, hours, link, review, rating, review count, licence number or award the request doesn't give (and never a 555 number or one copied from an example). If the request asks for placeholders, a missing fact is a clearly marked [[PLACEHOLDER]]; otherwise leave it out.
 - Images: use the addresses the request gives; otherwise https://images.unsplash.com photos that fit, with width/height and alt text. Every page: <title>, meta description, viewport meta, one <h1>.
 - Mobile first: every page works at 390px wide. Accessible: real buttons and links, labels, contrast.
 - If the request carries a style (colours, type, components, MUST/NEVER rules), follow it exactly.
@@ -54,7 +55,7 @@ export const PHASE_SYSTEM = `You are Nova's website builder, writing ONE phase o
 
 ${SITE_RULES}
 
-Write exactly this phase's files (and only the menu/link edits it needs on other pages). Whole files for new pages; EDIT blocks for existing files. End with a REPLY of one sentence about what this phase added.
+Write exactly this phase's files (and only the menu/link edits it needs on other pages). A page is a full page, not a stub: several sections that suit it (a services page: every service with its price, what's included and who it's for, then booking; a home page: hero, what she offers, why her, how booking works, a closing call to action), at the quality the request asks for. Whole files for new pages; EDIT blocks for existing files. End with a REPLY of one sentence about what this phase added.
 
 When THE CLASSES are given, a page uses only those classes (plus small page-only styles in a <style> if it must) and the stylesheet styles every one of them; both copy THE SHARED HEADER AND FOOTER exactly.
 

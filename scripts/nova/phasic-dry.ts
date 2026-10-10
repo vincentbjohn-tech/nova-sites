@@ -38,7 +38,7 @@ const result = await runRequest(
 	{
 		async model(messages, opts) {
 			const s = Date.now();
-			const out = await call(messages);
+			const out = await call(messages, opts);
 			calls.push({ label: opts?.label, seconds: (Date.now() - s) / 1000, inChars: messages.reduce((n, m) => n + m.content.length, 0), outChars: out.length });
 			console.log(JSON.stringify({ t: at(), call: opts?.label, seconds: (Date.now() - s) / 1000, outChars: out.length }));
 			return out;

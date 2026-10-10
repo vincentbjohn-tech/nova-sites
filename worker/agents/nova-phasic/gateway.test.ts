@@ -11,7 +11,7 @@ describe('the phased builder model: one plain completion through the gateway', (
 			return new Response(JSON.stringify({ choices: [{ message: { content: 'hi' } }] }));
 		});
 		expect(await model!([{ role: 'user', content: 'x' }])).toBe('hi');
-		expect(seen).toEqual({ url: 'https://gw.example/v1/chat/completions', body: { model: 'cli:claude-sonnet', messages: [{ role: 'user', content: 'x' }], stream: false, response_format: { type: 'text' }, reasoning_effort: 'low' }, auth: 'Bearer k' });
+		expect(seen).toEqual({ url: 'https://gw.example/v1/chat/completions', body: { model: 'cli:claude-sonnet', messages: [{ role: 'user', content: 'x' }], stream: false, response_format: { type: 'text' }, reasoning_effort: 'medium' }, auth: 'Bearer k' });
 	});
 
 	it('NOVA_PHASE_MODEL picks the model; no gateway configured → null', () => {
@@ -39,5 +39,22 @@ describe('the browser check → problems worth a fix', () => {
 				requestFailures: [{ url: 'https://p/img.jpg', failure: 'net', status: 404 }, { url: 'https://p/favicon.ico', failure: 'net', status: 404 }],
 			}),
 		).toEqual(['Page error: SyntaxError: bad', 'Console error: x is not defined', 'Failed to load https://p/img.jpg: 404']);
+	});
+});
+
+describe('effort per call: the plan quick, the pages with more care', () => {
+	it('the first answer runs at the plan effort, a phase at the phase effort (both configurable)', async () => {
+		const seen: unknown[] = [];
+		const fetcher = async (_u: unknown, init?: RequestInit) => {
+			seen.push(JSON.parse(String(init?.body)).reasoning_effort);
+			return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+		};
+		const model = phaseModel(env, fetcher)!;
+		await model([], { label: 'first' });
+		await model([], { label: 'phase 2' });
+		const tuned = phaseModel({ ...env, NOVA_PLAN_EFFORT: 'medium', NOVA_PHASE_EFFORT: 'high' }, fetcher)!;
+		await tuned([], { label: 'first' });
+		await tuned([], { label: 'phase 1' });
+		expect(seen).toEqual(['low', 'medium', 'medium', 'high']);
 	});
 });
