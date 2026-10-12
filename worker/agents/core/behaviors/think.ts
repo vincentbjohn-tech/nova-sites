@@ -44,7 +44,6 @@ import {
 	type SiteMeta,
 	type SourceFile,
 } from '../../think/nova-edits';
-import { planColour, planLogo, readBrand } from '../../think/nova-brand';
 import { CloudflareAPI } from '../../../services/deployer/api/cloudflare-api';
 import type { BranchDeploymentBundle } from '@space-do/space';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
@@ -1399,43 +1398,6 @@ export class ThinkCodingBehavior
 		const done = await this.novaCommitOwnerChange(result.path, result.content, `Changed “${shortFind}” to “${shortReplace}”`);
 		this.novaNoteForAgent(`They changed the text “${shortFind}” to “${shortReplace}” in ${result.path}.`);
 		return { path: result.path, ...done, ms: Date.now() - started };
-	}
-
-	/** The site's main colour and logo as they are now (Settings → Brand). */
-	async novaBrand() {
-		return readBrand(await this.novaSourceFiles());
-	}
-
-	/**
-	 * The owner's brand change from Settings, as one change: a new main colour (every `--primary`,
-	 * its shades moved with it, the text on it kept readable) and/or a new logo picture on every page.
-	 */
-	async novaSetBrand(change: { colour?: string; accent?: string; logo?: { from: string; to: string } }) {
-		const started = Date.now();
-		let files = await this.novaSourceFiles();
-		const changed = new Map<string, string>();
-		const said: string[] = [];
-		for (const [value, name, words] of [
-			[change.colour, '--primary', 'the main colour'],
-			[change.accent, '--accent', 'the second colour'],
-		] as const) {
-			if (value === undefined) continue;
-			const plan = planColour(files, value, name);
-			if (!plan.ok) return { error: plan.error };
-			for (const f of plan.files) changed.set(f.path, f.content);
-			said.push(`${words} to ${value.toUpperCase()}`);
-			files = files.map((f) => ({ path: f.path, content: changed.get(f.path) ?? f.content }));
-		}
-		if (change.logo) {
-			const plan = planLogo(files, change.logo.from, change.logo.to);
-			if (!plan.length) return { error: 'no_logo' as const };
-			for (const f of plan) changed.set(f.path, f.content);
-			said.push('the logo');
-		}
-		if (!changed.size) return { error: 'nothing' as const };
-		const done = await this.novaCommitChange([...changed].map(([path, content]) => ({ path, content })), `Changed ${said.join(' and ')}`, 'you');
-		this.novaNoteForAgent(`They changed ${said.join(' and ')} in Settings. Keep it as they set it.`);
-		return { ...done, files: [...changed.keys()], ms: Date.now() - started };
 	}
 
 	/** Repoint links (exact hrefs) across the site as one owner change, e.g. booking buttons to Nova's booking page. */
