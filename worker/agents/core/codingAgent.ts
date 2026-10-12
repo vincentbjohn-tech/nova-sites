@@ -435,6 +435,7 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
     novaTextEdit(find: string, replace: string, path?: string) { return this.novaBehavior().novaTextEdit(find, replace, path); }
     novaSetFirstLabel(label: string) { return this.novaBehavior().novaSetFirstLabel(label); }
     novaHideHistory(hashes: string[]) { return this.novaBehavior().novaHideHistory(hashes); }
+    novaSetTitle(title: string) { return this.novaBehavior().novaSetTitle(title); }
     novaLinkEdit(changes: { from: string; to: string; text?: string }[], label: string) { return this.novaBehavior().novaLinkEdit(changes, label); }
     novaSetMeta(meta: Parameters<ThinkCodingBehavior['novaSetMeta']>[0], path?: string) { return this.novaBehavior().novaSetMeta(meta, path); }
     novaSetMetaPages(...args: Parameters<ThinkCodingBehavior['novaSetMetaPages']>) { return this.novaBehavior().novaSetMetaPages(...args); }

@@ -691,7 +691,12 @@ export class ThinkCodingBehavior
 							(type === 'conversation_response' ? { conversationId: IdGenerator.generateConversationId(), ...data } : data) as never,
 						);
 					},
-					onPlan: (plan) => touch({ plan, done: resume?.done ?? [] }),
+					onPlan: (plan) => {
+						touch({ plan, done: this.state.novaActiveTurn?.done ?? resume?.done ?? [] });
+						// The site's own name as soon as there is one, never the request's first line (12 Oct: a
+						// style's instructions showed as the title for the whole build).
+						if (isNew && plan.title && plan.title !== this.state.blueprint?.title) void this.setTitle(plan.title).catch(() => undefined);
+					},
 					onPhaseDone: (i) => touch({ done: [...(this.state.novaActiveTurn?.done ?? []), i] }),
 					log: (message, data) => this.logger.warn(message, data),
 				},
@@ -1465,6 +1470,11 @@ export class ThinkCodingBehavior
 		return first && request === this.state.query ? first : request;
 	}
 
+	/** The site's name from Nova OS at creation (the business's name), so the request never names it. */
+	async novaSetTitle(title: string): Promise<void> {
+		await this.setTitle(title);
+	}
+
 	novaSetFirstLabel(label: string): void {
 		this.setState({ ...this.state, novaFirstLabel: label.slice(0, 2000) });
 	}
@@ -1624,6 +1634,14 @@ export class ThinkCodingBehavior
 						request: this.novaOwnerWords(this.state.novaActiveTurn.request).slice(0, 4000),
 						startedAt: new Date(this.state.novaActiveTurn.startedAt).toISOString(),
 						steps: this.state.novaActiveTurn.steps ?? 0,
+						// The plan and its finished phases: a reload shows the same progress card.
+						plan: this.state.novaActiveTurn.plan
+							? {
+									phases: this.state.novaActiveTurn.plan.phases.map((ph) => ({ name: ph.name, after: ph.after })),
+									done: this.state.novaActiveTurn.done ?? [],
+									assumed: this.state.novaActiveTurn.plan.assumed ?? [],
+								}
+							: null,
 					}
 				: null,
 			previewUrl,

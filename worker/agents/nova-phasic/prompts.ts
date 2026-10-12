@@ -45,7 +45,8 @@ DECIDE, then answer in exactly one of these three ways:
 3. Anything bigger (a new site, a new page, a redesign, several sections): only a plan, as JSON:
 <<<PLAN>>>
 {"reply": "what you'll do, in one or two plain sentences, specific to their words (no style names, font names or colour codes)",
- "title": "a short site name (only for a new site)",
+ "title": "a short site name (only for a new site): the business's name when the request gives it",
+ "assumed": ["at most 3 short plain sentences for the owner: what you left out or decided because the request didn't say, e.g. \"No phone or address yet, so I left them out.\" No jargon, no dashes"],
  "phases": [{"name": "Your look and home page", "files": ["public/styles.css", "public/index.html"], "after": []},
             {"name": "Services with prices", "files": ["public/services.html"], "after": [0]}]}
 <<<END PLAN>>>

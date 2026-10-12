@@ -380,6 +380,8 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 			title = p.title;
 			deps.onPlan?.(p);
 			if (p.reply && !input.resume) deps.emit('conversation_response', { message: p.reply, isStreaming: false });
+			// The site's name and what it assumed, for the editor (the card shows them; nothing parsed from words).
+			deps.emit('nova_plan', { title: p.title ?? null, assumed: p.assumed ?? [] });
 			p.phases.forEach((ph, i) => deps.emit('phase_generated', { message: ph.name, phase: phaseInfo(ph.name, ph.files, i, p.phases.length, ph.after) }));
 			const planText = JSON.stringify({ title: p.title, phases: p.phases }, null, 1);
 			needsCss = p.phases.some((ph) => ph.files.includes('public/styles.css'));

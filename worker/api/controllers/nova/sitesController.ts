@@ -77,6 +77,7 @@ export class NovaSitesController extends BaseController {
 		if (!prompt) return NovaSitesController.createErrorResponse('Describe the site you want', 400);
 		// What the owner wrote, when Nova OS sent a composed brief (a style): History and Publish show this.
 		const label = NovaSitesController.str(createBody.label, 2000)?.trim();
+		const title = NovaSitesController.str(createBody.title, 60)?.trim();
 		const forwarded = new Request(new URL('/api/agent', request.url), {
 			method: 'POST',
 			headers: request.headers,
@@ -107,6 +108,7 @@ export class NovaSitesController extends BaseController {
 		}
 		if (!agentId || failure) return NovaSitesController.createErrorResponse(failure ?? 'Could not start the site', 500);
 		const stub = await getAgentStub(env, agentId);
+		if (title) await stub.novaSetTitle(title);
 		if (label) await stub.novaSetFirstLabel(label);
 		await stub.novaStartBuild();
 		return NovaSitesController.createSuccessResponse({ id: agentId });
