@@ -195,6 +195,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 		retry: (problems: string, current: string) => Promise<PhaseOutput>,
 		expected: string[] = [],
 		fullPages = false,
+		counted = true,
 	): Promise<{ writes: Map<string, string>; reply?: string; layout?: string }> => {
 		for (let attempt = 0; ; attempt++) {
 			// Rules for a stylesheet the site doesn't have (an older site keeps its styles in the page): they go
@@ -240,7 +241,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 					problems.push(`${path} shows new placeholder text like [[…]]: leave the missing fact out instead (never show placeholder text).`);
 			}
 			// A new site's new pages are full pages (enough sections, a photo up top), as the old builder's.
-			if (fullPages) for (const f of out.files) problems.push(...pageShortfalls(f.path, writes.get(f.path) ?? f.content));
+			if (fullPages) for (const f of out.files) problems.push(...pageShortfalls(f.path, writes.get(f.path) ?? f.content, counted));
 			if (!problems.length) return { writes, reply: out.reply, layout: out.layout };
 			deps.log?.(attempt >= 1 ? 'nova_phase_failed' : 'nova_phase_retry', { problems: problems.join('\n').slice(0, 2000) });
 			if (attempt >= 1) throw new Problem(problems.join('\n'));
@@ -415,6 +416,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 								),
 							ph.files,
 							needsCss,
+							!p.outline,
 						);
 						// A new page on an existing site joins every page's menu by code (the model wrote only the page).
 						if (!needsCss) {

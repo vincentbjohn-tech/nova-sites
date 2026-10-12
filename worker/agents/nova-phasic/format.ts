@@ -200,14 +200,17 @@ const DEFAULT_MIN_SECTIONS = 4;
 /**
  * What a NEW page of a new site is missing to be a full page: enough sections, and a photo in the
  * section it opens with (Vincent, 11 Oct: "as rich as the old one"; a contact page had an empty hero).
- * Not for a 404 page, and never for edits to a page that exists.
+ * Not for a 404 page, and never for edits to a page that exists. `counted` false: the plan's outline
+ * decides how many sections a page has; only the photo it opens with is checked.
  */
-export function pageShortfalls(path: string, html: string): string[] {
+export function pageShortfalls(path: string, html: string, counted = true): string[] {
 	if (!/^public\/.+\.html?$/.test(path) || /(^|\/)404\.html?$/.test(path)) return [];
 	const out: string[] = [];
 	const sections = [...html.matchAll(/<section\b[^>]*>([\s\S]*?)<\/section>/gi)];
 	const want = MIN_SECTIONS[path] ?? DEFAULT_MIN_SECTIONS;
-	if (sections.length < want) out.push(`${path} has ${sections.length} sections; a full page here has at least ${want}`);
+	// A plan with an outline sets each page's sections (a short book-a-call page is short on purpose:
+	// 12 Oct, two rebuilds refused for "5 sections; at least 6" and nothing was saved).
+	if (counted && sections.length < want) out.push(`${path} has ${sections.length} sections; a full page here has at least ${want}`);
 	const first = sections[0]?.[0] ?? '';
 	if (!/<img\b|<picture\b|background(-image)?\s*:[^;"]*url\(/i.test(first))
 		out.push(`${path} opens without a photo; its first section needs one (an <img> or a background image)`);
