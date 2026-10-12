@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planColour, planLogo, readBrand, readableInk } from './nova-brand';
+import { contrastOf, planColour, planLogo, readBrand, readableInk } from './nova-brand';
 
 const css = (root: string) => ({ path: 'public/styles.css', content: `:root{\n  ${root}\n}\nbody{color:var(--ink)}\n.btn{background:var(--primary)}\n` });
 const page = (path: string, header: string) => ({
@@ -11,6 +11,10 @@ describe('reading the brand: the main colour and the logo, as the site has them 
 	it('the main colour is the --primary of the stylesheet', () => {
 		const b = readBrand([css('--bg:#FBF6F4; --ink:#2A1720; --primary:#5C2340; --primary-ink:#FBF6F4;'), page('public/index.html', '')]);
 		expect(b.colour).toBe('#5C2340');
+	});
+	it('the second colour is the --accent, where the style has one', () => {
+		expect(readBrand([css('--primary:#5C2340; --accent:#D9707E;')]).accent).toBe('#D9707E');
+		expect(readBrand([css('--primary:#5C2340;')]).accent).toBeNull();
 	});
 	it('a site with no --primary has no colour to change (null, never a guess)', () => {
 		expect(readBrand([css('--bg:#fff; --ink:#111;')]).colour).toBeNull();
@@ -75,6 +79,20 @@ describe('changing the main colour: every --primary on the site, its shades move
 	});
 	it('the same colour again changes nothing', () => {
 		expect(planColour([css('--primary:#5C2340;')], '#5c2340')).toEqual({ ok: false, error: 'same' });
+	});
+});
+
+describe('changing the second colour (--accent): only it and its shades, its text form kept readable', () => {
+	it('moves --accent and --accent-text, leaves --primary alone', () => {
+		const plan = planColour([css('--bg:#FBF6F4; --primary:#5C2340; --accent:#D9707E; --accent-text:#B4445A;')], '#F4D35E', '--accent');
+		if (!plan.ok) throw new Error('no plan');
+		const c = plan.files[0].content;
+		expect(c).toMatch(/--accent:\s*#F4D35E/);
+		expect(c).toMatch(/--primary:\s*#5C2340/);
+		// A yellow accent's text form is darkened until it reads on the light page.
+		const text = c.match(/--accent-text:\s*(#[0-9A-F]{6})/i)?.[1];
+		expect(text).toBeDefined();
+		expect(contrastOf(text!, '#FBF6F4')).toBeGreaterThanOrEqual(4.5);
 	});
 });
 
