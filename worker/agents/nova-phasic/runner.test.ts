@@ -320,7 +320,29 @@ describe('the look and the home page get the most care', () => {
 			return model(m, o);
 		};
 		await runRequest(s.deps, { request: 'A site' });
-		expect(labels).toEqual(['first', 'look', 'phase 2']);
+		// A new site's plan is 'first-new': the gateway plans it with the strongest model (12 Oct).
+		expect(labels).toEqual(['first-new', 'look', 'phase 2']);
+	});
+});
+
+describe("the plan's outline and kind reach every page (12 Oct: a funnel brief came out as a thin salon page)", () => {
+	it('every phase reads the kind and the whole outline, with the media addresses it names', async () => {
+		const prompts: string[] = [];
+		const outline = 'index: 1. VSL hero: label FREE TRAINING, h1 Become the voice, video poster https://m/stage.webp; 2. Proof strip\nthank-you: 1. YOU\'RE BOOKED';
+		const plan = `<<<PLAN>>>\n${JSON.stringify({ reply: 'x', kind: 'funnel', outline, phases: [{ name: 'Your look and home page', files: ['public/styles.css', 'public/index.html'] }, { name: 'Thank-you page', files: ['public/thank-you.html'], after: [0] }] })}\n<<<END PLAN>>>`;
+		const s = fakeSite({}, [plan, `<<<FILE public/styles.css>>>\nb{}\n<<<END FILE>>>\n${page('public/index.html', '<h1>H</h1>')}`, page('public/thank-you.html', '<h1>T</h1>')]);
+		const model = s.deps.model;
+		s.deps.model = (m, o) => {
+			if (o?.label !== 'first-new') prompts.push(m.map((x) => x.content).join('\n'));
+			return model(m, o);
+		};
+		await runRequest(s.deps, { request: 'Build my funnel' });
+		expect(prompts).toHaveLength(2);
+		for (const p of prompts) {
+			expect(p).toContain('"kind": "funnel"');
+			expect(p).toContain(`THE OUTLINE (every page's sections, in order):\n${outline}`);
+			expect(p).toMatch(/THE OUTLINE in THE PLAN is the contract/);
+		}
 	});
 });
 

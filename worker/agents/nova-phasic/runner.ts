@@ -338,7 +338,9 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 			noteUnstyled(site);
 			active.add('your request');
 			const firstPrompt = `THE OWNER'S REQUEST:\n${withoutReference(input.request)}${history}\n\nTHE SITE'S FILES NOW:\n${filesBlock(site)}`;
-			const answer = await deps.model([{ role: 'system', content: FIRST_SYSTEM }, { role: 'user', content: firstPrompt }], { label: 'first' });
+			// A new site is planned with the most care (Opus, high): the outline it writes is what every page builds (Vincent, 12 Oct).
+			const isNew = !site.some((f) => f.path === 'public/index.html');
+			const answer = await deps.model([{ role: 'system', content: FIRST_SYSTEM }, { role: 'user', content: firstPrompt }], { label: isNew ? 'first-new' : 'first' });
 			active.delete('your request');
 			const first = parseFirstAnswer(answer);
 			if (first.kind === 'answer') return { reply: first.reply, changed: false, phases: [], failed: [] };
@@ -383,7 +385,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 			// The site's name and what it assumed, for the editor (the card shows them; nothing parsed from words).
 			deps.emit('nova_plan', { title: p.title ?? null, assumed: p.assumed ?? [] });
 			p.phases.forEach((ph, i) => deps.emit('phase_generated', { message: ph.name, phase: phaseInfo(ph.name, ph.files, i, p.phases.length, ph.after) }));
-			const planText = JSON.stringify({ title: p.title, phases: p.phases }, null, 1);
+			const planText = `${JSON.stringify({ title: p.title, kind: p.kind ?? 'website', phases: p.phases }, null, 1)}${p.outline ? `\n\nTHE OUTLINE (every page's sections, in order):\n${p.outline}` : ''}`;
 			needsCss = p.phases.some((ph) => ph.files.includes('public/styles.css'));
 			const shared = ['public/styles.css', 'public/index.html'];
 			const result = await runPhases(

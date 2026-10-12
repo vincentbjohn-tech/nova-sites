@@ -8,6 +8,9 @@ import { resolveNovaGatewayModel } from '../think/nova-gateway';
 import type { ChatMessage } from './runner';
 
 export const NOVA_PHASE_DEFAULT_MODEL = 'cli:claude-sonnet';
+/** Every first answer, above all a new site's plan (its outline is the contract every page builds): the strongest model. */
+export const NOVA_PLAN_DEFAULT_MODEL = 'cli:claude-opus';
+export const NOVA_NEW_PLAN_DEFAULT_EFFORT = 'high';
 export const NOVA_PLAN_DEFAULT_EFFORT = 'low';
 export const NOVA_PHASE_DEFAULT_EFFORT = 'medium';
 export const NOVA_LOOK_DEFAULT_EFFORT = 'high';
@@ -24,9 +27,15 @@ export function phaseModel(env: unknown, fetcher: typeof fetch = (...a) => fetch
 	const phaseEffort = (e.NOVA_PHASE_EFFORT ?? '').trim() || NOVA_PHASE_DEFAULT_EFFORT;
 	// The look and the home page set the whole site's quality: the most care (Vincent, 10 Oct).
 	const lookEffort = ((env as { NOVA_LOOK_EFFORT?: string }).NOVA_LOOK_EFFORT ?? '').trim() || NOVA_LOOK_DEFAULT_EFFORT;
+	const planModel = ((env as { NOVA_PLAN_MODEL?: string }).NOVA_PLAN_MODEL ?? '').trim() || NOVA_PLAN_DEFAULT_MODEL;
+	const newPlanEffort = ((env as { NOVA_NEW_PLAN_EFFORT?: string }).NOVA_NEW_PLAN_EFFORT ?? '').trim() || NOVA_NEW_PLAN_DEFAULT_EFFORT;
 	if (!gw) return null;
 	return async (messages: ChatMessage[], opts?: { label?: string }): Promise<string> => {
-		const effort = opts?.label === 'first' ? planEffort : opts?.label?.startsWith('look') ? lookEffort : phaseEffort;
+		const newPlan = opts?.label === 'first-new';
+		const effort = newPlan ? newPlanEffort : opts?.label === 'first' ? planEffort : opts?.label?.startsWith('look') ? lookEffort : phaseEffort;
+		// Every first answer (the plan, a small change, a question) is the plan model's: a rebuild of a site that
+		// has pages is planned as carefully as a new one, only with less effort.
+		const use = newPlan || opts?.label === 'first' ? planModel : model;
 		const r = await fetcher(`${gw.baseURL}/chat/completions`, {
 			method: 'POST',
 			headers: { Authorization: `Bearer ${gw.apiKey}`, 'Content-Type': 'application/json' },
@@ -34,7 +43,7 @@ export function phaseModel(env: unknown, fetcher: typeof fetch = (...a) => fetch
 			// Streamed: the gateway sends a keep-alive every few seconds while the model writes, so a long
 			// page (look + home, 2-4 min) isn't cut off as an idle connection (10 Oct: every live call past
 			// ~2 min was lost, the same call from outside ran 280 s fine).
-			body: JSON.stringify({ model, messages, stream: true, response_format: { type: 'text' }, reasoning_effort: effort }),
+			body: JSON.stringify({ model: use, messages, stream: true, response_format: { type: 'text' }, reasoning_effort: effort }),
 		});
 		if (!r.ok) throw new GatewayError(`the model gateway answered ${r.status}`);
 		const raw = await r.text();

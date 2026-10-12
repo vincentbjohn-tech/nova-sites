@@ -59,6 +59,26 @@ describe('effort per call: the plan quick, the pages with more care', () => {
 	});
 });
 
+describe('the plan is the strongest model (12 Oct)', () => {
+	it("a new site's plan: Opus at high effort; any other first answer: Opus at the plan effort; pages stay on the page model", async () => {
+		const seen: [unknown, unknown][] = [];
+		const fetcher = async (_u: unknown, init?: RequestInit) => {
+			const b = JSON.parse(String(init?.body));
+			seen.push([b.model, b.reasoning_effort]);
+			return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+		};
+		const model = phaseModel(env, fetcher)!;
+		await model([], { label: 'first-new' });
+		await model([], { label: 'first' });
+		await model([], { label: 'look' });
+		await model([], { label: 'phase 2' });
+		expect(seen).toEqual([['cli:claude-opus', 'high'], ['cli:claude-opus', 'low'], ['cli:claude-sonnet', 'high'], ['cli:claude-sonnet', 'medium']]);
+		const tuned = phaseModel({ ...env, NOVA_PLAN_MODEL: 'cli:claude-sonnet', NOVA_NEW_PLAN_EFFORT: 'medium' }, fetcher)!;
+		await tuned([], { label: 'first-new' });
+		expect(seen.at(-1)).toEqual(['cli:claude-sonnet', 'medium']);
+	});
+});
+
 describe('the look runs at its own effort', () => {
 	it('label "look" → NOVA_LOOK_EFFORT (high by default)', async () => {
 		const seen: unknown[] = [];
