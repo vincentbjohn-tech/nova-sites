@@ -367,6 +367,16 @@ describe('new-site pages are asked for again when thin', () => {
 		expect(e.prompts).toHaveLength(1);
 	});
 
+	it("a plan with an outline sets the page's length: a short book-a-call page is kept, never refused for its section count (12 Oct)", async () => {
+		const short = `<section class="hero"><img src="poster.jpg" alt=""></section>${'<section>s</section>'.repeat(3)}`;
+		const plan = `<<<PLAN>>>\n${JSON.stringify({ reply: 'x', kind: 'funnel', outline: 'index: 1. VSL 2. Reasons 3. Daniel 4. Closing band', phases: [{ name: 'Your look and the call page', files: ['public/styles.css', 'public/index.html'] }] })}\n<<<END PLAN>>>`;
+		const s = fakeSite({}, [plan, `<<<FILE public/styles.css>>>\nb{}\n<<<END FILE>>>\n<<<FILE public/index.html>>>\n${short}\n<<<END FILE>>>`]);
+		const r = await runRequest(s.deps, { request: 'A short book-a-call page' });
+		expect(r.failed).toEqual([]);
+		expect(s.prompts.some((p) => /sections; a full page/.test(p))).toBe(false); // never sent back for its length
+		expect(s.files['public/index.html']).toContain('poster.jpg');
+	});
+
 	it('page phases read the style reference page too; the plan does not', async () => {
 		const styled = 'Build it.\nREFERENCE IMPLEMENTATION: the Blush style.\n```html\n<!doctype html><p>REFERENCE-PAGE</p>\n```\nNEVER: purple.';
 		const full = `<section class="hero"><img src="h.jpg" alt=""></section>${'<section>s</section>'.repeat(5)}`;
