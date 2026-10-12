@@ -80,14 +80,15 @@ export function buildEditScript(allowedOrigins: string[]): string {
   document.addEventListener('focusout', (e) => { if (editing && e.target === editing) finish(editing, true); }, true);
   window.addEventListener('message', (e) => {
     if (!ORIGINS.includes(e.origin) || !e.data || e.data.source !== 'nova-os') return;
-    if (e.data.type === 'ping') { post({ type: 'ready' }); return; }
+    if (e.data.type === 'ping') { post({ type: 'ready', path: location.pathname }); return; }
     if (e.data.type === 'scroll-to' && typeof e.data.y === 'number') { window.scrollTo({ top: e.data.y, behavior: 'instant' }); return; }
     if (e.data.type === 'edit-mode') { on = !!e.data.on; if (!on && editing) finish(editing, true); mark(); }
   });
+  // Which page is showing rides on 'ready' (path): the editor's page switcher follows a link clicked inside.
   // Where the page is scrolled, so a new version of it opens at the same place (one message per frame at most).
   let scrollTick = null;
   window.addEventListener('scroll', () => { if (scrollTick !== null) return; scrollTick = requestAnimationFrame(() => { scrollTick = null; post({ type: 'scroll', y: window.scrollY }); }); }, { passive: true });
-  const start = () => { mark(); new MutationObserver(() => { if (on && !editing) mark(); }).observe(document.body, { childList: true, subtree: true }); post({ type: 'ready' }); };
+  const start = () => { mark(); new MutationObserver(() => { if (on && !editing) mark(); }).observe(document.body, { childList: true, subtree: true }); post({ type: 'ready', path: location.pathname }); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();`;
 }
