@@ -26,6 +26,10 @@ export interface Plan {
 	/** What the builder assumed because the request didn't say (the owner sees it once the build is done). */
 	assumed?: string[];
 	phases: Phase[];
+	/** A new site or a rebuild: a funnel (one goal, one path, a video first) or a website. */
+	kind?: 'website' | 'funnel';
+	/** Every page's sections in order, with their words and media addresses: the contract each phase builds. */
+	outline?: string;
 	/** The shared header and footer, once the look phase has written them (kept for a restart). */
 	layout?: string;
 	/** A new site's design contract, written with the plan: the class names every page uses (each with
@@ -36,6 +40,7 @@ export interface Plan {
 export type FirstAnswer = { kind: 'plan'; plan: Plan } | { kind: 'direct'; output: PhaseOutput } | { kind: 'answer'; reply: string };
 
 export const MAX_PHASES = 8;
+const OUTLINE_MAX = 16_000;
 const NAME_MAX = 80;
 
 const FALLBACK: Phase = { name: 'Your change', files: [], after: [] };
@@ -62,6 +67,8 @@ function cleanPlan(raw: unknown): Plan {
 		...(Array.isArray(o.assumed)
 			? { assumed: o.assumed.filter((a): a is string => typeof a === 'string' && !!a.trim()).map((a) => a.trim().slice(0, 160)).slice(0, 3) }
 			: {}),
+		...(o.kind === 'website' || o.kind === 'funnel' ? { kind: o.kind } : {}),
+		...(typeof o.outline === 'string' && o.outline.trim() ? { outline: o.outline.trim().slice(0, OUTLINE_MAX) } : {}),
 		phases: phases.length ? lookFirst(phases) : [FALLBACK],
 	};
 }

@@ -20,6 +20,15 @@ describe('the first answer of a request: a plan, the change itself, or just word
 		expect(p.phases[2]).toEqual({ name: 'About Kristi', files: ['public/about.html'], after: [0] });
 	});
 
+	it("keeps the kind and the outline (a funnel or a website; every page's sections)", () => {
+		const a = parseFirstAnswer(`<<<PLAN>>>${JSON.stringify({ reply: 'x', kind: 'funnel', outline: '  index: 1. VSL hero  ', phases: [{ name: 'Home', files: ['public/index.html'] }] })}<<<END PLAN>>>`);
+		expect(a.kind === 'plan' && a.plan.kind).toBe('funnel');
+		expect(a.kind === 'plan' && a.plan.outline).toBe('index: 1. VSL hero');
+		const b = parseFirstAnswer(`<<<PLAN>>>${JSON.stringify({ reply: 'x', kind: 'shop', outline: 3, phases: [] })}<<<END PLAN>>>`);
+		expect(b.kind === 'plan' && 'kind' in b.plan).toBe(false);
+		expect(b.kind === 'plan' && 'outline' in b.plan).toBe(false);
+	});
+
 	it('keeps what it assumed: at most three plain sentences, nothing that is not words', () => {
 		const a = parseFirstAnswer(
 			`<<<PLAN>>>\n${JSON.stringify({ reply: 'x', title: 'Test Construction Co.', assumed: ['No phone yet, so I left it out.', 4, '', 'Book now opens your booking page.', 'Send me prices.', 'A fourth.'], phases: [{ name: 'Home', files: ['public/index.html'] }] })}\n<<<END PLAN>>>`,
