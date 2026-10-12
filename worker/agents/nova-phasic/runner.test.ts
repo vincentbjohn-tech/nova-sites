@@ -129,6 +129,10 @@ describe('a new site: plan, then phases, pages side by side, one deploy at a tim
 		// Every phase is shown up front (the timeline), before the first is written.
 		const generated = s.events.filter((e) => e.type === 'phase_generated');
 		expect(generated).toHaveLength(3);
+		// The editor gets the name and what was assumed as data, before the first phase (12 Oct spec).
+		const plan = s.events.find((e) => e.type === 'nova_plan');
+		expect(plan?.data).toEqual({ title: 'Kristi Grace Hair', assumed: [] });
+		expect(s.events.indexOf(plan!)).toBeLessThan(s.events.indexOf(generated[0]));
 		expect(s.events.findIndex((e) => e.type === 'phase_implementing')).toBeGreaterThan(s.events.lastIndexOf(generated[2]));
 		// Later phases see the shared look and the home page's header.
 		expect(s.prompts[2]).toContain('body{}');

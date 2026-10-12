@@ -20,6 +20,15 @@ describe('the first answer of a request: a plan, the change itself, or just word
 		expect(p.phases[2]).toEqual({ name: 'About Kristi', files: ['public/about.html'], after: [0] });
 	});
 
+	it('keeps what it assumed: at most three plain sentences, nothing that is not words', () => {
+		const a = parseFirstAnswer(
+			`<<<PLAN>>>\n${JSON.stringify({ reply: 'x', title: 'Test Construction Co.', assumed: ['No phone yet, so I left it out.', 4, '', 'Book now opens your booking page.', 'Send me prices.', 'A fourth.'], phases: [{ name: 'Home', files: ['public/index.html'] }] })}\n<<<END PLAN>>>`,
+		);
+		if (a.kind !== 'plan') throw new Error('not a plan');
+		expect(a.plan.title).toBe('Test Construction Co.');
+		expect(a.plan.assumed).toEqual(['No phone yet, so I left it out.', 'Book now opens your booking page.', 'Send me prices.']);
+	});
+
 	it('a small change comes back done in the first answer (no second call)', () => {
 		const a = parseFirstAnswer('<<<EDIT public/index.html>>>\n<<<FIND>>>\n<h1>A</h1>\n<<<REPLACE>>>\n<h1>B</h1>\n<<<END EDIT>>>\n<<<REPLY>>>\nThe headline reads B now.\n<<<END REPLY>>>');
 		expect(a.kind).toBe('direct');

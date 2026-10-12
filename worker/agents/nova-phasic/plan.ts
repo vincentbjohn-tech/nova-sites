@@ -23,6 +23,8 @@ export interface Plan {
 	/** What Nova will do, in one or two plain sentences. */
 	reply: string;
 	title?: string;
+	/** What the builder assumed because the request didn't say (the owner sees it once the build is done). */
+	assumed?: string[];
 	phases: Phase[];
 	/** The shared header and footer, once the look phase has written them (kept for a restart). */
 	layout?: string;
@@ -57,6 +59,9 @@ function cleanPlan(raw: unknown): Plan {
 	return {
 		reply: typeof o.reply === 'string' ? o.reply.trim() : '',
 		...(typeof o.title === 'string' && o.title.trim() ? { title: o.title.trim().slice(0, 60) } : {}),
+		...(Array.isArray(o.assumed)
+			? { assumed: o.assumed.filter((a): a is string => typeof a === 'string' && !!a.trim()).map((a) => a.trim().slice(0, 160)).slice(0, 3) }
+			: {}),
 		phases: phases.length ? lookFirst(phases) : [FALLBACK],
 	};
 }
