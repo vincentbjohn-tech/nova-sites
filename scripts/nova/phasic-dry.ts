@@ -60,6 +60,9 @@ const result = await runRequest(
 		async browserCheck() {
 			return [];
 		},
+		log(message, data) {
+			console.log(JSON.stringify({ t: at(), log: message, ...data }));
+		},
 		emit(type, data) {
 			if (type === 'nova_progress') return;
 			const phase = (data.phase as { name?: string } | undefined)?.name;
