@@ -47,8 +47,9 @@ export function readBrand(files: SourceFile[]): Brand {
 	let logo: Brand['logo'] = null;
 	if (home) {
 		const header = home.content.match(/<header\b[\s\S]*?<\/header>/i)?.[0] ?? '';
-		// The element marked logo (or brand): <a class="logo">…</a>, <div class="brand">…</div>.
-		const marked = header.match(/<(a|div|span|p)\b[^>]*class\s*=\s*["'][^"']*\b(logo|brand)\b[^"']*["'][^>]*>([\s\S]*?)<\/\1>/i);
+		// The element marked logo (or brand), wherever the page's top bar puts it (a <header>, or a
+		// bar of its own after it): <a class="logo">…</a>, <div class="brand">…</div>.
+		const marked = home.content.match(/<(a|div|span|p)\b[^>]*class\s*=\s*["'][^"']*\b(logo|brand)\b[^"']*["'][^>]*>([\s\S]*?)<\/\1>/i);
 		const img = (marked ? marked[3] : header).match(/<img\b[^>]*>/i)?.[0];
 		if (img) logo = { kind: 'image', src: attr(img, 'src'), alt: attr(img, 'alt') };
 		else if (marked && words(marked[3])) logo = { kind: 'text', text: words(marked[3]) };

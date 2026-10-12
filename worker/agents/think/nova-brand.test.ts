@@ -23,6 +23,10 @@ describe('reading the brand: the main colour and the logo, as the site has them 
 		const b = readBrand([page('public/index.html', '<a class="logo" href="/" aria-label="home"><b>Kristi <i>Grace</i></b><span>Hair</span></a>')]);
 		expect(b.logo).toEqual({ kind: 'text', text: 'Kristi Grace Hair' });
 	});
+	it('a logo in a top bar outside the <header> (the header is a thin info strip) is still found', () => {
+		const html = '<header class="bar"><span>Austin, TX</span></header><nav class="main"><a class="logo" href="index.html"><b>Kristi <i>Grace</i></b><span>Hair Studio</span></a></nav>';
+		expect(readBrand([{ path: 'public/index.html', content: html }]).logo).toEqual({ kind: 'text', text: 'Kristi Grace Hair Studio' });
+	});
 	it('no element marked logo: the first picture in the header, else nothing', () => {
 		expect(readBrand([page('public/index.html', '<img src="/brand.svg" alt="Maple"><nav></nav>')]).logo).toEqual({ kind: 'image', src: '/brand.svg', alt: 'Maple' });
 		expect(readBrand([page('public/index.html', '<nav><a href="/">Home</a></nav>')]).logo).toBeNull();
