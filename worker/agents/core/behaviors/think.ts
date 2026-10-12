@@ -1410,16 +1410,20 @@ export class ThinkCodingBehavior
 	 * The owner's brand change from Settings, as one change: a new main colour (every `--primary`,
 	 * its shades moved with it, the text on it kept readable) and/or a new logo picture on every page.
 	 */
-	async novaSetBrand(change: { colour?: string; logo?: { from: string; to: string } }) {
+	async novaSetBrand(change: { colour?: string; accent?: string; logo?: { from: string; to: string } }) {
 		const started = Date.now();
 		let files = await this.novaSourceFiles();
 		const changed = new Map<string, string>();
 		const said: string[] = [];
-		if (change.colour !== undefined) {
-			const plan = planColour(files, change.colour);
+		for (const [value, name, words] of [
+			[change.colour, '--primary', 'the main colour'],
+			[change.accent, '--accent', 'the second colour'],
+		] as const) {
+			if (value === undefined) continue;
+			const plan = planColour(files, value, name);
 			if (!plan.ok) return { error: plan.error };
 			for (const f of plan.files) changed.set(f.path, f.content);
-			said.push(`the main colour to ${change.colour.toUpperCase()}`);
+			said.push(`${words} to ${value.toUpperCase()}`);
 			files = files.map((f) => ({ path: f.path, content: changed.get(f.path) ?? f.content }));
 		}
 		if (change.logo) {

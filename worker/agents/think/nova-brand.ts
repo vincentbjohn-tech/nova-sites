@@ -11,6 +11,8 @@ import type { SourceFile } from './nova-edits';
 
 export interface Brand {
 	colour: string | null;
+	/** The second colour (`--accent`) where the style has one: highlights, small marks, links. */
+	accent: string | null;
 	logo: { kind: 'image'; src: string; alt: string } | { kind: 'text'; text: string } | null;
 }
 
@@ -43,6 +45,8 @@ const attr = (tag: string, name: string) => tag.match(new RegExp(`\\b${name}\\s*
 export function readBrand(files: SourceFile[]): Brand {
 	const raw = rootValue(files, '--primary');
 	const colour = raw && hex(raw) ? raw : null;
+	const rawAccent = rootValue(files, '--accent');
+	const accent = rawAccent && hex(rawAccent) ? rawAccent : null;
 	const home = files.find((f) => /(^|\/)index\.html?$/i.test(f.path)) ?? files.find((f) => isPage(f.path));
 	let logo: Brand['logo'] = null;
 	if (home) {
@@ -54,7 +58,7 @@ export function readBrand(files: SourceFile[]): Brand {
 		if (img) logo = { kind: 'image', src: attr(img, 'src'), alt: attr(img, 'alt') };
 		else if (marked && words(marked[3])) logo = { kind: 'text', text: words(marked[3]) };
 	}
-	return { colour, logo };
+	return { colour, accent, logo };
 }
 
 // ---- colours -------------------------------------------------------------------------------
@@ -78,6 +82,7 @@ function luminance(h: string): number {
 	});
 	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
+export const contrastOf = (a: string, b: string) => contrast(a, b);
 const contrast = (a: string, b: string) => {
 	const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
 	return (x + 0.05) / (y + 0.05);
@@ -118,24 +123,45 @@ function moveShade(shade: string, from: string, to: string): string {
 
 export type ColourPlan = { ok: true; from: string; files: SourceFile[] } | { ok: false; error: 'bad_colour' | 'no_colour' | 'same' };
 
-export function planColour(files: SourceFile[], wanted: string): ColourPlan {
+/** `fg` darkened or lightened (keeping its hue) until it reads on `bg` at 4.5:1. */
+function readableOn(fg: string, bg: string): string {
+	if (contrast(fg, bg) >= 4.5) return fg;
+	const [h, sat, l] = hsl(rgb(fg));
+	const darker = luminance(bg) > 0.4;
+	for (let step = 1; step <= 20; step += 1) {
+		const c = toHex(fromHsl([h, sat, clamp01(l + (darker ? -0.04 : 0.04) * step)]));
+		if (contrast(c, bg) >= 4.5) return c;
+	}
+	return readableInk(bg, []);
+}
+
+/**
+ * A new colour for `name` (`--primary`, the main colour, or `--accent`, the second one) wherever a
+ * `:root` declares it. Its shades (`<name>-hover`, `-tint`, …) move with it; `<name>-ink` (text on
+ * it) and `<name>-text` (it as text on the page) are kept readable.
+ */
+export function planColour(files: SourceFile[], wanted: string, name: '--primary' | '--accent' = '--primary'): ColourPlan {
 	const to = hex(wanted);
 	if (!to) return { ok: false, error: 'bad_colour' };
-	const fromRaw = rootValue(files, '--primary');
+	const fromRaw = rootValue(files, name);
 	const from = fromRaw ? hex(fromRaw) : null;
 	if (!from) return { ok: false, error: 'no_colour' };
 	if (from === to) return { ok: false, error: 'same' };
-	const inkNow = rootValue(files, '--primary-ink');
+	const inkNow = rootValue(files, `${name}-ink`);
 	const ink = readableInk(to, [inkNow ?? '', rootValue(files, '--bg') ?? '', rootValue(files, '--ink') ?? '']);
+	const page = hex(rootValue(files, '--bg') ?? '') ?? '#FFFFFF';
+	const pattern = new RegExp(`(${name}(-[a-z0-9-]+)?\\s*:\\s*)([^;}\\n]+)`, 'gi');
 	const out: SourceFile[] = [];
 	for (const f of files) {
 		if (!isStyle(f.path) && !isPage(f.path)) continue;
 		const content = f.content.replace(ROOT_BLOCK, (block) =>
-			block.replace(/(--primary(-[a-z0-9-]+)?\s*:\s*)([^;}\n]+)/gi, (all, head: string, suffix: string | undefined, value: string) => {
+			block.replace(pattern, (all, head: string, suffix: string | undefined, value: string) => {
 				if (!suffix) return `${head}${to}`;
 				if (suffix.toLowerCase() === '-ink') return `${head}${ink}`;
 				const shade = hex(value);
-				return shade ? `${head}${moveShade(shade, from, to)}` : all;
+				if (!shade) return all;
+				const moved = moveShade(shade, from, to);
+				return `${head}${suffix.toLowerCase() === '-text' ? readableOn(moved, page) : moved}`;
 			}),
 		);
 		if (content !== f.content) out.push({ path: f.path, content });
