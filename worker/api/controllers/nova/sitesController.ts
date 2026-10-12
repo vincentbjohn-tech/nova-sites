@@ -232,38 +232,6 @@ export class NovaSitesController extends BaseController {
 		}
 	}
 
-	static async brand(_request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
-		const stub = await NovaSitesController.ownedStub(env, context);
-		if (!stub) return NovaSitesController.notFound();
-		try {
-			return NovaSitesController.createSuccessResponse(await stub.novaBrand());
-		} catch (error) {
-			return NovaSitesController.busyOr(error);
-		}
-	}
-
-	/** Settings → Brand: `colour` and `accent` ("#RRGGBB") and/or `logo` {from, to} (picture addresses). */
-	static async setBrand(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
-		const stub = await NovaSitesController.ownedStub(env, context);
-		if (!stub) return NovaSitesController.notFound();
-		const body = await NovaSitesController.body(request);
-		const colour = NovaSitesController.str(body.colour, 20);
-		const accent = NovaSitesController.str(body.accent, 20);
-		const logoBody = body.logo && typeof body.logo === 'object' ? (body.logo as Json) : undefined;
-		const from = logoBody ? NovaSitesController.str(logoBody.from, 2000) : undefined;
-		const to = logoBody ? NovaSitesController.str(logoBody.to, 2000) : undefined;
-		if (colour === undefined && accent === undefined && (!from || !to)) return NovaSitesController.createErrorResponse('colour, accent or logo {from, to} is required', 400);
-		try {
-			const result = await stub.novaSetBrand({ colour, accent, ...(from && to ? { logo: { from, to } } : {}) });
-			if ('error' in result) {
-				return new Response(JSON.stringify({ success: false, error: result.error }), { status: 409, headers: { 'Content-Type': 'application/json' } });
-			}
-			return NovaSitesController.createSuccessResponse(result);
-		} catch (error) {
-			return NovaSitesController.busyOr(error);
-		}
-	}
-
 	static async text(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
 		const stub = await NovaSitesController.ownedStub(env, context);
 		if (!stub) return NovaSitesController.notFound();

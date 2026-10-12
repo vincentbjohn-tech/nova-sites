@@ -8,7 +8,6 @@ const SITE_RULES = `THE SITE
 - One shared stylesheet public/styles.css linked from every page; small page-only styles may sit in a <style> in that page.
 - Every page has the same header (logo/name and the menu linking every page) and the same footer: copy THE SHARED HEADER AND FOOTER when given, else copy them from public/index.html when it exists.
 - Real, specific copy for this business from the request; never lorem ipsum.
-- The logo in the header is one element with class="logo": the owner's logo picture (an <img> inside it) when the request gives one, else the business name as words. The main colour is --primary and the second colour --accent, in :root of public/styles.css (the text on them --primary-ink / --accent-ink, shades --primary-<name> / --accent-<name>); everything in those colours uses var(--primary) / var(--accent), never their hex copied, so the owner can swap the logo and both colours from Settings.
 - Never invent a fact: no phone number, address, price, hours, link, review, rating, review count, licence number or award the request doesn't give (and never a 555 number or one copied from an example).
 - Never show placeholder text on a page: no [[…]], no "TBD", no "your phone here". A fact the request doesn't give is left out (drop that line, button or section), even where the request says to mark placeholders.
 - Nothing is hidden until a script runs: no text, section or button that starts invisible and waits for JavaScript or a scroll animation to appear.

@@ -22,8 +22,6 @@ export function setupNovaRoutes(app: Hono<AppEnv>): void {
     novaRouter.post('/sites/:id/message', auth, adaptController(S, S.message));
     novaRouter.post('/sites/:id/text', auth, adaptController(S, S.text));
     novaRouter.post('/sites/:id/links', auth, adaptController(S, S.links));
-    novaRouter.get('/sites/:id/brand', auth, adaptController(S, S.brand));
-    novaRouter.post('/sites/:id/brand', auth, adaptController(S, S.setBrand));
     novaRouter.post('/sites/:id/meta', auth, adaptController(S, S.meta));
     novaRouter.post('/sites/:id/read', auth, adaptController(S, S.read));
     novaRouter.get('/sites/:id/history', auth, adaptController(S, S.history));
