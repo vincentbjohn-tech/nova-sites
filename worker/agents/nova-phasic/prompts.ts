@@ -16,6 +16,7 @@ const SITE_RULES = `THE SITE
 - Every text stays readable on its background: check emphasis (em, strong), links and button labels on dark and coloured bands, not only on the page background.
 - Images: use the addresses the request gives; otherwise https://images.unsplash.com photos that fit, with width/height and alt text. Every page: <title>, meta description, viewport meta, one <h1>.
 - What each uploaded file is for, from its name and description: a logo, wordmark, mark, favicon, app icon or avatar is only for the header, the footer, an icon or a small accent, never a content photo or a hero (the header uses the wide/horizontal logo when there is one, never the small square icon); a share image (og, share card, social banner) goes only in the og:image/twitter:image tags, never on the page; a texture is a background, never a photo with a caption; people and places are the content photos. Each content photo is used once per page, where the request says, and every <img> has width, height and a fitting object-fit so nothing is stretched or cropped badly.
+- Every form follows THE SITE'S FORMS (where it posts and what it sends): never a form that posts nowhere, only pretends to send, or posts to an address you made up.
 - Mobile first: every page works at 390px wide. Accessible: real buttons and links, labels, contrast.
 - If the request carries a style (colours, type, components, MUST/NEVER rules), follow it exactly.
 - Never say the site is live or published: changes are in the preview until the owner presses Publish.
@@ -87,6 +88,23 @@ export const STYLE_FIX_SYSTEM = `You are Nova's website builder. The pages use c
 export const FIX_SYSTEM = `You are Nova's website builder. The site's pages show errors in a real browser. Fix them with the smallest EDIT blocks, changing nothing else.
 
 ${SITE_RULES}`;
+
+/** Where this site's forms post: Nova OS keeps the person and sends the file (Nova OS sites/forms.py). */
+export function formAddress(env: unknown, siteId: string): string {
+	const origins = (env as { NOVA_OS_ORIGINS?: string }).NOVA_OS_ORIGINS ?? 'https://os.usenovaos.com';
+	const origin = origins.split(',').map((o) => o.trim()).filter(Boolean)[0] ?? 'https://os.usenovaos.com';
+	return `${origin.replace(/\/+$/, '')}/api/public/forms/${encodeURIComponent(siteId)}`;
+}
+
+/** The forms rule, with this site's own form address in it (in every prompt that may write a form). */
+export function formsBlock(address: string): string {
+	return `THE SITE'S FORMS (Nova OS keeps everyone who fills one in, in the owner's clients)
+- Every sign-up, opt-in, free-download, waitlist or contact form is <form method="post" action="${address}">. This exact address, never another one.
+- Its fields: name (one field; or first_name and last_name), email (type="email", required), phone only when the page asks for it. Also <input type="text" name="website" tabindex="-1" autocomplete="off" hidden> left empty (it catches robots).
+- A free download (a guide, checklist, PDF, workbook, video): <input type="hidden" name="file" value="…"> with the file's exact library address, as the request or the site gives it (https://media.novasites.workers.dev/…); never one you make up. Nova OS emails them that file.
+- <input type="hidden" name="next" value="…"> with the page they go to after (the thank-you page, as a path on this site, e.g. /thank-you). That page offers the same file with a Download button (<a href="the same address" download>), so they get it on screen at once as well as by email.
+- The plain post works with no script. A script may send it instead: the same fields as FormData, fetch POST to the same address, the answer is JSON {ok, download_url, next, error}; when ok is false show error beside the form, otherwise go to next (or show download_url).`;
+}
 
 /** The site's files as the model reads them, the biggest cut off past `budget` characters in all. */
 export function filesBlock(files: { path: string; content: string }[], budget = 160_000): string {
