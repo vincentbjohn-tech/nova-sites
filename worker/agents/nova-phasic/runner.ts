@@ -14,7 +14,7 @@
  */
 import { addMenuLink, applyEdits, pageShortfalls, parsePhaseOutput, unstyledClasses, type PhaseOutput } from './format';
 import { parseFirstAnswer, runPhases, type Plan } from './plan';
-import { FIRST_SYSTEM, FIX_SYSTEM, PHASE_SYSTEM, STYLE_FIX_SYSTEM, filesBlock } from './prompts';
+import { FIRST_SYSTEM, FIX_SYSTEM, PHASE_SYSTEM, STYLE_FIX_SYSTEM, filesBlock, formsBlock } from './prompts';
 
 export interface ChatMessage {
 	role: 'system' | 'user' | 'assistant';
@@ -48,6 +48,8 @@ export interface RequestInput {
 	concurrency?: number;
 	/** Carry on a plan a restart interrupted. */
 	resume?: { plan: Plan; done: number[] };
+	/** Where this site's forms post (Nova OS); every prompt that may write a form carries the rule. */
+	formAddress?: string;
 	/** The most a workspace call (list, read, write, deploy, browser check) may take; never a model call. */
 	callTimeoutMs?: number;
 }
@@ -184,6 +186,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 		return Promise.all(paths.map(async (path) => ({ path, content: await deps.readFile(path).catch(() => '') })));
 	};
 
+	const forms = input.formAddress ? `\n\n${formsBlock(input.formAddress)}` : '';
 	const history = input.history?.length ? `\n\nTHE OWNER'S EARLIER REQUESTS ON THIS SITE (oldest first, context only):\n${input.history.map((h) => `- ${h}`).join('\n')}` : '';
 
 	/**
@@ -338,7 +341,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 			const site = await readSite();
 			noteUnstyled(site);
 			active.add('your request');
-			const firstPrompt = `THE OWNER'S REQUEST:\n${withoutReference(input.request)}${history}\n\nTHE SITE'S FILES NOW:\n${filesBlock(site)}`;
+			const firstPrompt = `THE OWNER'S REQUEST:\n${withoutReference(input.request)}${history}${forms}\n\nTHE SITE'S FILES NOW:\n${filesBlock(site)}`;
 			// A new site is planned with the most care (Opus, high): the outline it writes is what every page builds (Vincent, 12 Oct).
 			const isNew = !site.some((f) => f.path === 'public/index.html');
 			const answer = await deps.model([{ role: 'system', content: FIRST_SYSTEM }, { role: 'user', content: firstPrompt }], { label: isNew ? 'first-new' : 'first' });
@@ -401,7 +404,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 						// Every page reads the real stylesheet AND the home page it was written with (Vincent, 10 Oct).
 						const seen = site.filter((f) => shared.includes(f.path) || ph.files.includes(f.path));
 						const others = site.filter((f) => !seen.includes(f)).map((f) => f.path);
-						const prompt = `THE OWNER'S REQUEST:\n${input.request}${history}\n\nTHE PLAN:\n${planText}\n\nTHIS PHASE: ${ph.name} (phase ${i + 1} of ${p.phases.length}; files: ${ph.files.join(', ') || 'as needed'})\n\n${p.classes ? `THE CLASSES (the only ones pages use; the stylesheet styles every one):\n${p.classes}\n\n` : ''}${p.layout ? `THE SHARED HEADER AND FOOTER (every page uses exactly this markup; mark the current page in the menu):\n${p.layout}\n\n` : ''}THE FILES IT BUILDS ON:\n${filesBlock(seen)}${others.length ? `\n\nOTHER FILES (not shown): ${others.join(', ')}` : ''}`;
+						const prompt = `THE OWNER'S REQUEST:\n${input.request}${history}${forms}\n\nTHE PLAN:\n${planText}\n\nTHIS PHASE: ${ph.name} (phase ${i + 1} of ${p.phases.length}; files: ${ph.files.join(', ') || 'as needed'})\n\n${p.classes ? `THE CLASSES (the only ones pages use; the stylesheet styles every one):\n${p.classes}\n\n` : ''}${p.layout ? `THE SHARED HEADER AND FOOTER (every page uses exactly this markup; mark the current page in the menu):\n${p.layout}\n\n` : ''}THE FILES IT BUILDS ON:\n${filesBlock(seen)}${others.length ? `\n\nOTHER FILES (not shown): ${others.join(', ')}` : ''}`;
 						const msgs: ChatMessage[] = [{ role: 'system', content: PHASE_SYSTEM }, { role: 'user', content: prompt }];
 						const label = ph.files.includes('public/styles.css') ? 'look' : `phase ${i + 1}`;
 						const answer = await deps.model(msgs, { label });
@@ -499,7 +502,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 					const answer = await deps.model(
 						[
 							{ role: 'system', content: FIX_SYSTEM },
-							{ role: 'user', content: `THE BROWSER SHOWS:\n${errors.slice(0, 20).join('\n')}\n\nTHE SITE'S FILES:\n${filesBlock(site)}` },
+							{ role: 'user', content: `THE BROWSER SHOWS:\n${errors.slice(0, 20).join('\n')}${forms}\n\nTHE SITE'S FILES:\n${filesBlock(site)}` },
 						],
 						{ label: 'fix' },
 					);

@@ -52,6 +52,7 @@ import { resolveCloudflareAccessToken } from '../../../services/rate-limit/usage
 import type { CloudflareDeploymentErrorCode } from '../../../api/websocketTypes';
 import { runRequest, type RequestResult } from '../../nova-phasic/runner';
 import { browserProblems, phaseModel, phasicOn } from '../../nova-phasic/gateway';
+import { formAddress, formsBlock } from '../../nova-phasic/prompts';
 import { getBrowserCaptureClient } from '../../../services/browser-capture/factory';
 
 /**
@@ -365,6 +366,9 @@ export class ThinkCodingBehavior
 			'Then do ALL of it in this turn. A large request (a full redesign or rebrand of several pages) is still one job: work page by page, deploy after each page, and do not stop until every page, every link and every booking button is done and checked. Never leave it half-done and never ask the owner to send it again.',
 			'End the turn with a summary of what changed (pages, brand, which photos and files you used and where) and what the owner should look at, in plain words, no file paths or code.',
 			'Files the owner attached are named in their message with their library address (photos, videos, logos, fonts) and, for documents and spreadsheets, their text: use that content as facts (prices, services, wording); never invent prices, hours or links.',
+			'',
+			'## Forms',
+			formsBlock(formAddress(this.env, this.getAgentId())),
 			'',
 			'## Preview is not live',
 			'`deploy_space` updates the PREVIEW only. Never tell the owner the site is "published", "live" or "updated on your site" because of it; say "it\'s in the preview" or "ready in the preview". Only the owner\'s Publish button puts it live, and only say "live" if they published.',
@@ -700,7 +704,7 @@ export class ThinkCodingBehavior
 					onPhaseDone: (i) => touch({ done: [...(this.state.novaActiveTurn?.done ?? []), i] }),
 					log: (message, data) => this.logger.warn(message, data),
 				},
-				{ request, history, browserCheck: true, resume },
+				{ request, history, browserCheck: true, resume, formAddress: formAddress(this.env, this.getAgentId()) },
 			);
 		} catch (e) {
 			this.logger.error('Phased builder request failed', e);

@@ -496,3 +496,29 @@ describe('never claim a change that was not made (Vincent, 11 Oct)', () => {
 		expect(s.files['public/styles.css']).toBeUndefined();
 	});
 });
+
+describe("the site's forms post to Nova OS (16 Oct: a lead-magnet form posted to an address that didn't exist)", () => {
+	const address = 'https://os.usenovaos.com/api/public/forms/site-1';
+
+	it('the first answer and every phase carry this site\'s own form address', async () => {
+		const s = fakeSite({}, [
+			PLAN,
+			`<<<FILE public/styles.css>>>\nbody{}\n<<<END FILE>>>\n${page('public/index.html', '<nav>Home Services About</nav>')}`,
+			(p) => page(p.includes('THIS PHASE: Services') ? 'public/services.html' : 'public/about.html', '<h1>x</h1>'),
+			(p) => page(p.includes('THIS PHASE: Services') ? 'public/services.html' : 'public/about.html', '<h1>y</h1>'),
+		]);
+		await runRequest(s.deps, { request: 'A 3-page site for Kristi', formAddress: address });
+		expect(s.prompts.length).toBeGreaterThanOrEqual(4);
+		for (const p of s.prompts) {
+			expect(p).toContain(`<form method="post" action="${address}">`);
+			expect(p).toContain('name="file"');
+			expect(p).toContain('name="next"');
+		}
+	});
+
+	it('the rules every call reads say a form never posts to a made-up address', async () => {
+		const s = fakeSite({ 'public/index.html': '<h1>Hi</h1>' }, ['<<<REPLY>>>\nOk.\n<<<END REPLY>>>']);
+		await runRequest(s.deps, { request: 'Hi' });
+		expect(s.prompts[0]).toContain("Every form follows THE SITE'S FORMS");
+	});
+});
