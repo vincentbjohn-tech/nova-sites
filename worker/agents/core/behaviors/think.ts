@@ -40,6 +40,7 @@ import {
 	toHistory,
 	netUnpublished,
 	planLinkChanges,
+	restoreFailure,
 	CONTINUE_MARKER,
 	type SiteMeta,
 	type SourceFile,
@@ -1483,6 +1484,20 @@ export class ThinkCodingBehavior
 		this.setState({ ...this.state, novaFirstLabel: label.slice(0, 2000) });
 	}
 
+	/**
+	 * Put a version's History words right and forget notes queued for Nova's next turn that are not
+	 * true (17 Oct: a restore that never happened labelled Dr. Martha's last change "Went back…" and
+	 * told Nova every later change was undone on purpose).
+	 */
+	novaCorrectHistory(hash: string, label: string, dropNotes: string[]): { label: string; notesDropped: number } {
+		this.novaLabel(hash, label);
+		const drop = new Set(dropNotes);
+		const notes = this.state.novaOwnerNotes ?? [];
+		const kept = notes.filter((n) => !drop.has(n));
+		this.setState({ ...this.state, novaOwnerNotes: kept });
+		return { label: this.state.novaLabels?.[hash] ?? '', notesDropped: notes.length - kept.length };
+	}
+
 	novaHideHistory(hashes: string[]): { hidden: number } {
 		const all = new Set([...(this.state.novaHiddenHistory ?? []), ...hashes]);
 		this.setState({ ...this.state, novaHiddenHistory: [...all].slice(-500) });
@@ -1524,9 +1539,22 @@ export class ThinkCodingBehavior
 	async novaRestore(hash: string) {
 		if (this.isCodeGenerating()) throw new Error('busy');
 		const branch = this.state.currentBranch || 'main';
+		const headBefore = await this.novaHead();
 		const output = await this.callSpace((space) => space.rollbackToCommit(branch, hash));
+		// A restore that didn't happen is an error, never "done" (17 Oct: Dr. Martha's restore answered
+		// success, made no new version, and still labelled her latest change "Went back…").
+		const failed = restoreFailure(output);
+		if (failed) {
+			this.logger.warn('nova_restore_failed', { hash, reason: failed });
+			throw new Error(`restore_failed: ${failed}`);
+		}
 		await this.handleDeploySpaceOutput(output);
 		const head = await this.novaHead();
+		if (!head || head === headBefore) {
+			this.logger.warn('nova_restore_failed', { hash, reason: 'no new version' });
+			throw new Error('restore_failed: no new version was made');
+		}
+		this.logger.info('nova_restore_done', { hash, head, changed: (output as { changed?: number }).changed });
 		const restored = this.state.novaLabels?.[hash];
 		const plain = restored?.replace(/^(Went back to: )+/, '');
 		this.novaLabel(head, plain ? `Went back to: ${plain}` : 'Went back to an earlier version');
@@ -1715,3 +1743,4 @@ const NOVA_STALL_MS = 90_000;
 const NOVA_CONTINUE_TRIES = 3;
 const NOVA_CONTINUE_PROMPT =
 	`${CONTINUE_MARKER}: a tool result came back and you did not continue. Carry on with the owner\'s request from exactly where you stopped. Do not redo steps that are already done; check the files if unsure. Finish the whole job, then give your summary.)`;
+
