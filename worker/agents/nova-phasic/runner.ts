@@ -14,7 +14,7 @@
  */
 import { addMenuLink, applyEdits, pageShortfalls, parsePhaseOutput, unstyledClasses, type PhaseOutput } from './format';
 import { parseFirstAnswer, runPhases, type Plan } from './plan';
-import { FIRST_SYSTEM, FIX_SYSTEM, PHASE_SYSTEM, STYLE_FIX_SYSTEM, filesBlock, formsBlock } from './prompts';
+import { FIRST_SYSTEM, FIX_SYSTEM, PHASE_SYSTEM, STYLE_FIX_SYSTEM, filesBlock, formsBlock, shownWhole } from './prompts';
 
 export interface ChatMessage {
 	role: 'system' | 'user' | 'assistant';
@@ -78,7 +78,9 @@ export function ownWordsName(request: string): string {
 const FIX_PHASE = 'Fixing a small problem';
 
 function order(paths: string[]): string[] {
-	const rank = (p: string) => (p === 'public/index.html' ? 0 : p === 'public/styles.css' ? 1 : /\.html?$/.test(p) ? 2 : 3);
+	// Every stylesheet right after the home page, wherever it lives (a site brought over keeps its look in
+	// public/assets/theme.css): on a big site the pages after it are the ones cut off, never the look.
+	const rank = (p: string) => (p === 'public/index.html' ? 0 : p === 'public/styles.css' ? 1 : /\.css$/i.test(p) ? 2 : /\.html?$/.test(p) ? 3 : 4);
 	return [...paths].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
@@ -199,23 +201,39 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 		expected: string[] = [],
 		fullPages = false,
 		counted = true,
+		shown?: Set<string>,
 	): Promise<{ writes: Map<string, string>; reply?: string; layout?: string }> => {
+		const seenWhole = new Set(shown ?? []);
 		for (let attempt = 0; ; attempt++) {
 			// Rules for a stylesheet the site doesn't have (an older site keeps its styles in the page): they go
 			// into the page's own <style>, so they take effect (11 Oct, emerald buttons).
 			out = await cssIntoPage(out);
 			const writes = new Map<string, string>();
-			for (const f of out.files) writes.set(f.path, f.content);
 			const problems: string[] = out.unterminated.map((p) => `The block for ${p} was cut off: write it again, whole.`);
 			for (const p of out.malformed) problems.push(`The block for ${p} could not be read: an EDIT is <<<FIND>>> the exact current text <<<REPLACE>>> the new text <<<END EDIT>>>.`);
-			// A planned file the answer never wrote: the phase isn't done (seen 10 Oct: a page phase that
-			// answered with one sentence and no file).
+			const current: { path: string; content: string }[] = [];
+			const existing = out.files.length || out.edits.length || expected.length ? new Set((await deps.listFiles()).map((p) => p.replace(/^\/+/, ''))) : new Set<string>();
+			for (const f of out.files) {
+				// A whole file over one that is there but was never shown whole would replace what it never
+				// saw (16 Oct: a menu change rewrote Dr. Martha's stylesheet, and with it her colours and type,
+				// from nothing). It goes back with the file as it is, for EDIT blocks.
+				if (shown && existing.has(f.path) && !seenWhole.has(f.path)) {
+					const now = await deps.readFile(f.path).catch(() => null);
+					if (now !== null) {
+						problems.push(`${f.path} already exists and you were not shown it, so a FILE block would replace what is in it: change it with EDIT blocks against its current text (below), or leave it as it is.`);
+						current.push({ path: f.path, content: now });
+						continue;
+					}
+				}
+				writes.set(f.path, f.content);
+			}
+			// A planned NEW file the answer never wrote: the phase isn't done (seen 10 Oct: a page phase that
+			// answered with one sentence and no file). A planned file that already exists and was left alone
+			// needed no change: it is never demanded (16 Oct: the demand made the model write a stylesheet whole).
 			const touched = new Set([...out.files.map((f) => f.path), ...out.edits.map((e) => e.path)]);
-			for (const path of expected) if (!touched.has(path)) problems.push(`${path} is missing: write it now with a FILE block (or EDIT blocks if it exists).`);
+			for (const path of expected) if (!touched.has(path) && !existing.has(path)) problems.push(`${path} is missing: write it now with a FILE block.`);
 			const byPath = new Map<string, { find: string; replace: string }[]>();
 			for (const e of out.edits) byPath.set(e.path, [...(byPath.get(e.path) ?? []), e]);
-			const current: { path: string; content: string }[] = [];
-			const existing = byPath.size ? new Set((await deps.listFiles()).map((p) => p.replace(/^\/+/, ''))) : new Set<string>();
 			for (const [path, edits] of byPath) {
 				// Only a file that is there is read (reading one that isn't never answered, 10 Oct).
 				const before = writes.get(path) ?? (existing.has(path) ? await deps.readFile(path).catch(() => null) : null);
@@ -250,6 +268,9 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 			if (attempt >= 1) throw new Problem(problems.join('\n'));
 			// The retry answers only what was wrong or missing: it adds to the first answer (seen 10 Oct: a
 			// look phase's stylesheet was dropped because its retry only brought the missing home page).
+			for (const path of shownWhole(current)) seenWhole.add(path);
+			// A refused whole file is not kept from the first answer: the retry's EDIT blocks replace it.
+			out = { ...out, files: out.files.filter((f) => writes.has(f.path) || !existing.has(f.path)) };
 			out = mergeAnswers(out, await retry(problems.join('\n\n'), filesBlock(current)));
 		}
 	};
@@ -368,6 +389,10 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 								{ label: 'retry' },
 							),
 						),
+						[],
+						false,
+						true,
+						shownWhole(site),
 					);
 					active.delete(DIRECT_PHASE.toLowerCase());
 					await commitPhase(DIRECT_PHASE, done.writes, 0, 1);
@@ -402,7 +427,15 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 					try {
 						const site = await readSite();
 						// Every page reads the real stylesheet AND the home page it was written with (Vincent, 10 Oct).
-						const seen = site.filter((f) => shared.includes(f.path) || ph.files.includes(f.path));
+						// The phase's stylesheets first, then the shared look and home page, then its pages: on a big site
+						// the budget cuts pages, never the look it is asked to keep (16 Oct, Dr. Martha's theme.css).
+						const mine = (f: { path: string }) => ph.files.includes(f.path);
+						const css = (f: { path: string }) => /\.css$/i.test(f.path);
+						const seen = [
+							...site.filter((f) => mine(f) && css(f)),
+							...site.filter((f) => shared.includes(f.path) && !(mine(f) && css(f))),
+							...site.filter((f) => mine(f) && !css(f) && !shared.includes(f.path)),
+						];
 						const others = site.filter((f) => !seen.includes(f)).map((f) => f.path);
 						const prompt = `THE OWNER'S REQUEST:\n${input.request}${history}${forms}\n\nTHE PLAN:\n${planText}\n\nTHIS PHASE: ${ph.name} (phase ${i + 1} of ${p.phases.length}; files: ${ph.files.join(', ') || 'as needed'})\n\n${p.classes ? `THE CLASSES (the only ones pages use; the stylesheet styles every one):\n${p.classes}\n\n` : ''}${p.layout ? `THE SHARED HEADER AND FOOTER (every page uses exactly this markup; mark the current page in the menu):\n${p.layout}\n\n` : ''}THE FILES IT BUILDS ON:\n${filesBlock(seen)}${others.length ? `\n\nOTHER FILES (not shown): ${others.join(', ')}` : ''}`;
 						const msgs: ChatMessage[] = [{ role: 'system', content: PHASE_SYSTEM }, { role: 'user', content: prompt }];
@@ -420,6 +453,7 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 							ph.files,
 							needsCss,
 							!p.outline,
+							shownWhole(seen),
 						);
 						// A new page on an existing site joins every page's menu by code (the model wrote only the page).
 						if (!needsCss) {
@@ -477,9 +511,16 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 						],
 						{ label: 'style pass' },
 					);
-					const done = await resolve(parsePhaseOutput(answer), async () => {
-						throw new Problem('the style pass could not be applied');
-					});
+					const done = await resolve(
+						parsePhaseOutput(answer),
+						async () => {
+							throw new Problem('the style pass could not be applied');
+						},
+						[],
+						false,
+						true,
+						shownWhole([css!], 40_000),
+					);
 					await commitPhase(STYLE_PHASE, done.writes, 98, 1);
 				} catch (e) {
 					failed.push({ phase: FIX_PHASE, error: e instanceof Error ? e.message : String(e) });
@@ -506,9 +547,16 @@ export async function runRequest(rawDeps: RunnerDeps, input: RequestInput): Prom
 						],
 						{ label: 'fix' },
 					);
-					const done = await resolve(parsePhaseOutput(answer), async () => {
-						throw new Problem('the fix could not be applied');
-					});
+					const done = await resolve(
+						parsePhaseOutput(answer),
+						async () => {
+							throw new Problem('the fix could not be applied');
+						},
+						[],
+						false,
+						true,
+						shownWhole(site),
+					);
 					await commitPhase(FIX_PHASE, done.writes, 99, 1);
 				} catch (e) {
 					// The pages work as they are; a fix that can't be applied is logged, never half-applied.

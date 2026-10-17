@@ -522,3 +522,62 @@ describe("the site's forms post to Nova OS (16 Oct: a lead-magnet form posted to
 		expect(s.prompts[0]).toContain("Every form follows THE SITE'S FORMS");
 	});
 });
+
+describe("a stylesheet is never rewritten blind (16 Oct: a menu change replaced Dr. Martha's whole look)", () => {
+	// Her site, in small: big pages, and the look in public/assets/theme.css (not public/styles.css).
+	const LOOK = `:root{--pink:#F42BA2;--ink:#17130F}\n${'.rule{color:var(--ink)}\n'.repeat(1100)}`;
+	const PAGES = ['index', 'about', 'book', 'book-a-call', 'community', 'free', 'podcast', 'press', 'the-reset', 'work-with-me'];
+	const pageHtml = (name: string) => `<!-- ${name} --><nav><a href="about">About</a><a href="press">Press</a></nav>${'<p>words</p>'.repeat(1700)}`;
+	const herSite = () => {
+		const files: Record<string, string> = { 'public/assets/theme.css': LOOK };
+		for (const n of PAGES) files[`public/${n}.html`] = pageHtml(n);
+		return files;
+	};
+	const pressOut = (paths: string[]) =>
+		paths.map((p) => `<<<EDIT ${p}>>>\n<<<FIND>>>\n<a href="press">Press</a>\n<<<REPLACE>>>\n\n<<<END EDIT>>>`).join('\n') +
+		'\n<<<REPLY>>>\nPress is out of the top menu.\n<<<END REPLY>>>';
+	// What the model wrote on the live site when it was told to write a stylesheet it was never shown.
+	const INVENTED = '<<<FILE public/assets/theme.css>>>\n:root{--pink:#C96A7C;--ink:#2b2420}\n<<<END FILE>>>\n<<<REPLY>>>\nDone.\n<<<END REPLY>>>';
+
+	it('a plan that lists the stylesheet beside the pages: the phase is shown the stylesheet whole, and never made to write it when it needs no change', async () => {
+		const pages = PAGES.map((n) => `public/${n}.html`);
+		const plan = `<<<PLAN>>>\n${JSON.stringify({ reply: 'x', phases: [{ name: 'Press off the top menu', files: [...pages, 'public/assets/theme.css'] }] })}\n<<<END PLAN>>>`;
+		const s = fakeSite(herSite(), [plan, pressOut(pages), INVENTED]);
+		const r = await runRequest(s.deps, { request: 'Take Press out of the top menu and put it in the footer' });
+		expect(s.files['public/assets/theme.css']).toBe(LOOK);
+		expect(s.prompts[1]).toContain('--pink:#F42BA2');
+		expect(s.files['public/index.html']).not.toContain('href="press"');
+		expect(r.failed).toEqual([]);
+	});
+
+	it('the first answer is shown the look before the pages, wherever the stylesheet lives', async () => {
+		const s = fakeSite(herSite(), ['<<<REPLY>>>\nOk.\n<<<END REPLY>>>']);
+		await runRequest(s.deps, { request: 'What colours does my site use?' });
+		expect(s.prompts[0]).toContain('--pink:#F42BA2');
+		expect(s.prompts[0]).toContain('--- public/work-with-me.html (not shown: too much at once)');
+	});
+
+	it('a whole-file answer over an existing file it was not shown is sent back with the file as it is, for EDIT blocks', async () => {
+		const s = fakeSite(herSite(), [
+			'<<<FILE public/work-with-me.html>>>\n<h1>Work with me</h1>\n<<<END FILE>>>\n<<<REPLY>>>\nDone.\n<<<END REPLY>>>',
+			'<<<EDIT public/work-with-me.html>>>\n<<<FIND>>>\n<a href="about">About</a>\n<<<REPLACE>>>\n<a href="about">About Martha</a>\n<<<END EDIT>>>\n<<<REPLY>>>\nThe menu says About Martha.\n<<<END REPLY>>>',
+		]);
+		const r = await runRequest(s.deps, { request: 'On work with me, call the About link About Martha' });
+		// The first answer never saw that page (cut off), so its whole file is refused…
+		expect(s.prompts[0]).not.toContain('<!-- work-with-me -->');
+		expect(s.prompts[1]).toContain('<!-- work-with-me -->');
+		// …and only the edit lands: the rest of the page is kept.
+		expect(s.files['public/work-with-me.html']).toBe(pageHtml('work-with-me').replace('<a href="about">About</a>', '<a href="about">About Martha</a>'));
+		expect(r.failed).toEqual([]);
+	});
+
+	it('a whole file the model WAS shown still goes through (a redesign the owner asked for)', async () => {
+		const s = fakeSite(herSite(), [
+			'<<<FILE public/assets/theme.css>>>\n:root{--pink:#0A7B5C}\n<<<END FILE>>>\n<<<REPLY>>>\nYour site is green now.\n<<<END REPLY>>>',
+		]);
+		const r = await runRequest(s.deps, { request: 'Redo my whole look in green' });
+		expect(s.files['public/assets/theme.css']).toContain(':root{--pink:#0A7B5C}');
+		expect(s.files['public/assets/theme.css']).not.toContain('#F42BA2');
+		expect(r.failed).toEqual([]);
+	});
+});
