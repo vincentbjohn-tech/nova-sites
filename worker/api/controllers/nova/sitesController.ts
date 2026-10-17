@@ -124,6 +124,22 @@ export class NovaSitesController extends BaseController {
 		return NovaSitesController.createSuccessResponse(await stub.novaHideHistory(hashes));
 	}
 
+	/** POST /api/nova/sites/:id/history/correct {hash, label, drop_notes?}: a version's History words, and queued notes for Nova that are not true. */
+	static async correctHistory(request: Request, env: Env, _ctx: ExecutionContext, context: RouteContext): Promise<Response> {
+		const S = NovaSitesController;
+		const stub = await S.ownedStub(env, context);
+		if (!stub) return S.notFound();
+		const body = await S.body(request);
+		const hash = typeof body.hash === 'string' && /^[0-9a-f]{40}$/.test(body.hash) ? body.hash : undefined;
+		const label = S.str(body.label, 300)?.trim();
+		const raw = body.drop_notes === undefined ? [] : body.drop_notes;
+		const dropNotes = Array.isArray(raw) ? raw.filter((n: unknown): n is string => typeof n === 'string' && n.length <= 2000) : null;
+		if (!hash || !label || !dropNotes || dropNotes.length !== (raw as unknown[]).length) {
+			return S.createErrorResponse('hash (full), label and drop_notes (a list of note texts) are required', 400);
+		}
+		return S.createSuccessResponse(await stub.novaCorrectHistory(hash, label, dropNotes));
+	}
+
 	/**
 	 * POST /api/nova/sites/import {title, files: {path: text}, label?} → {id, previewUrl}.
 	 * An existing site brought over as it is: a new site whose first version is these files.
@@ -353,6 +369,10 @@ export class NovaSitesController extends BaseController {
 		try {
 			return NovaSitesController.createSuccessResponse(await stub.novaRestore(hash));
 		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (message.includes('restore_failed:')) {
+				return NovaSitesController.createErrorResponse(`That version could not be restored (${message.split('restore_failed:')[1].trim()})`, 409);
+			}
 			return NovaSitesController.busyOr(error);
 		}
 	}
