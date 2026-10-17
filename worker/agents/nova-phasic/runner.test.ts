@@ -513,6 +513,10 @@ describe("the site's forms post to Nova OS (16 Oct: a lead-magnet form posted to
 			expect(p).toContain(`<form method="post" action="${address}">`);
 			expect(p).toContain('name="file"');
 			expect(p).toContain('name="next"');
+			// 17 Oct: the form's name (its list in People), questions by their own words, consent with its words.
+			expect(p).toContain('name="form"');
+			expect(p).toContain('name="consent_email"');
+			expect(p).toContain('name="consent_texts"');
 		}
 	});
 
