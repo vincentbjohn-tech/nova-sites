@@ -16,6 +16,7 @@ import {
 } from "./inspector-wrapper"
 import { ArtifactsBackend, resolveSpaceFsBackendMode, SqlBackend, type SpaceFsBackend } from "./fs-backend"
 import { stageWorkdir, stagedTreeMatchesHead, resolveHead } from "./git-objects"
+import { restoreWorkingTree } from "./restore"
 import { stripPreviewSecurityHeaders } from "./preview-headers"
 
 // ─── Inspector result types ────────────────────────────────────────────────
@@ -482,43 +483,26 @@ export class SpaceDO extends DurableObject<Env> {
       return { error: `Commit ${commitHash} not found on branch "${branch}"` }
     }
 
-    // Capture the file tree at the target commit as raw bytes. Reading and
-    // rewriting via bytes (not strings) keeps binary assets — fonts, images,
-    // favicons — byte-for-byte intact. Round-tripping them through UTF-8
-    // corrupts them and inflates each invalid byte into a 3-byte replacement
-    // char, which can push a file past the SQLite inline-value limit and throw
-    // SQLITE_TOOBIG (only reproduced on rollback, since normal deploys never
-    // rewrite these files).
-    await this.git.checkout({ ref: target.oid })
-    const targetFiles = new Map<string, Uint8Array>()
-    for (const info of await globInfos(this.overlay, "**/*")) {
-      if (info.type !== "file") continue
-      if (isReservedPath(info.path)) continue
-      const bytes = await this.overlay.readFileBytes(info.path)
-      if (bytes) targetFiles.set(info.path, bytes)
+    // Put the target commit's files back, read straight from git's objects (its tree and blobs, as
+    // raw bytes, so fonts and images stay intact). Never via `git.checkout(<old commit>)` + copy: that
+    // depends on the index, which a DO reset loses (checkout then refuses), and it answered "done"
+    // with nothing restored (17 Oct, Dr. Martha's site). Every way this can fail is an error here.
+    const headBefore = await resolveHead(this.fs, "HEAD")
+    if (headBefore === target.oid) {
+      return { error: `Already at ${target.oid.slice(0, 8)}: nothing to go back to` }
     }
-
-    // Return to the branch HEAD and reconcile the working tree: remove files
-    // that are absent from the target, then (over)write the captured files.
-    await this.git.checkout({ ref: branch })
-    for (const info of await globInfos(this.overlay, "**/*")) {
-      if (info.type !== "file") continue
-      if (isReservedPath(info.path)) continue
-      if (!targetFiles.has(info.path)) {
-        await this.overlay.rm(info.path, { force: true })
-      }
+    const { changed, files } = await restoreWorkingTree(this.fs, this.overlay, target.oid, isReservedPath)
+    if (files === 0) return { error: `Version ${target.oid.slice(0, 8)} has no files` }
+    if (changed === 0) {
+      return { error: `Version ${target.oid.slice(0, 8)} has the same files as now: nothing to go back to` }
     }
-    for (const [path, bytes] of targetFiles) {
-      await this.overlay.writeFileBytes(path, bytes)
+    const committed = await this.gitCommit(`rollback: restore ${target.oid.slice(0, 8)}`)
+    const headAfter = await resolveHead(this.fs, "HEAD")
+    if (!headAfter || headAfter === headBefore || committed.sha !== headAfter) {
+      return { error: `Restore of ${target.oid.slice(0, 8)} wrote ${changed} files but made no new version` }
     }
-
-    // Commit the restored tree (no-op if nothing changed) and redeploy.
-    try {
-      await this.gitCommit(`rollback: restore ${target.oid.slice(0, 8)}`)
-    } catch {
-      // Clean tree (already at target) — proceed to redeploy existing HEAD.
-    }
-    return this.deploy(branch)
+    const deployed = (await this.deploy(branch)) as Record<string, unknown>
+    return { ...deployed, restored: target.oid, head: headAfter, changed }
   }
 
   // ── Deploy RPC methods ──────────────────────────────────────────

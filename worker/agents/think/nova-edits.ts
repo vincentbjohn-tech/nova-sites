@@ -433,3 +433,13 @@ export function planLinkChanges(
 	}
 	return { files: out, counts };
 }
+
+/** Why a SpaceDO restore did not happen (its `{error}` answer), or null when it restored. */
+export function restoreFailure(output: unknown): string | null {
+	if (!output || typeof output !== 'object') return 'no answer from the workspace';
+	const o = output as { error?: unknown; restored?: unknown };
+	// Restored and committed: a preview that failed to rebuild is the deploy's problem, not the restore's.
+	if (typeof o.restored === 'string' && o.restored) return null;
+	if (typeof o.error === 'string' && o.error) return o.error;
+	return 'the workspace did not say it restored anything';
+}
