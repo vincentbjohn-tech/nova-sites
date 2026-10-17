@@ -480,7 +480,13 @@ export class SpaceDO extends DurableObject<Env> {
       (entry) => entry.oid === commitHash || entry.oid.startsWith(commitHash),
     )
     if (!target) {
-      return { error: `Commit ${commitHash} not found on branch "${branch}"` }
+      // Say exactly where we looked (17 Oct: this answer was the whole failure, and said too little).
+      const head = await resolveHead(this.fs, "HEAD")
+      const tip = await resolveHead(this.fs, branch)
+      const onHead = head ? (await this.git.log({ ref: head, depth: 1000 })).some((e) => e.oid.startsWith(commitHash)) : false
+      return {
+        error: `Commit ${commitHash} not found on branch "${branch}" (branch at ${tip?.slice(0, 8) ?? "none"}, ${history.length} versions; HEAD at ${head?.slice(0, 8) ?? "none"} on ${(await this.currentBranch()) ?? "no branch"}; in HEAD's history: ${onHead ? "yes" : "no"})`,
+      }
     }
 
     // Put the target commit's files back, read straight from git's objects (its tree and blobs, as
