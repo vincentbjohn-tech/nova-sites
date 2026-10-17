@@ -121,3 +121,15 @@ export function filesBlock(files: { path: string; content: string }[], budget = 
 	}
 	return parts.length ? parts.join('\n\n') : '(the site has no files yet: this is a new site)';
 }
+
+/** The files `filesBlock` (same order, same budget) shows whole: only these may be rewritten with a FILE block. */
+export function shownWhole(files: { path: string; content: string }[], budget = 160_000): Set<string> {
+	let left = budget;
+	const whole = new Set<string>();
+	for (const f of files) {
+		if (left <= 0) break;
+		if (f.content.length <= left) whole.add(f.path);
+		left -= Math.min(f.content.length, left);
+	}
+	return whole;
+}
